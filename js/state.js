@@ -1,4 +1,5 @@
 import { CONNECTION, PHASE, SCREEN } from "./constants.js";
+import { createSettings } from "../game/GameSettings.js";
 
 /**
  * The single store for the whole app.
@@ -51,17 +52,52 @@ export function createInitialMatch() {
     /** Monotonic id; every intent carries it so stale messages are droppable. */
     roundId: 0,
 
-    /** @type {string|null} player id supplying the starting letter this round */
+    /** The match rules every player agreed to. Host-editable in the lobby. */
+    settings: createSettings(),
+
+    /**
+     * Who is actually playing this round — the players who must commit a letter
+     * and who may submit a word. Everyone seated but absent from this list is an
+     * observer.
+     *
+     * It is everyone in DUEL and CONTAINS, and just the two duellists in
+     * ROUND_ROBIN. Publishing it rather than deriving it client-side means the
+     * board never has to re-implement the pairing rule to know who is up.
+     *
+     * @type {string[]}
+     */
+    activeIds: [],
+
+    /** How many round-robin rounds have been dealt; drives the rotation. */
+    rotationIndex: 0,
+
+    /** Who supplies the starting and ending letter (DUEL and ROUND_ROBIN). */
+    /** @type {string|null} */
     starterId: null,
-    /** @type {string|null} player id supplying the ending letter this round */
+    /** @type {string|null} */
     enderId: null,
 
     /** Who has committed a letter. Never carries the letter itself. */
     /** @type {Record<string, boolean>} */
     committed: {},
-    /** Revealed letters, null until the countdown finishes. */
-    /** @type {{start: string, end: string}|null} */
-    letters: null,
+
+    /**
+     * The revealed rule, null until the countdown finishes.
+     *
+     * `contributions` is the ordered list of who supplied which letter, and is
+     * what the board renders — one tile per contribution — so the same shape
+     * serves a two-player duel and a four-player letter hunt.
+     *
+     * @type {{
+     *   mode: string,
+     *   start?: string,
+     *   end?: string,
+     *   letters: string[],
+     *   contributions: {playerId: string, letter: string}[],
+     *   minWordLength: number
+     * }|null}
+     */
+    rule: null,
 
     /** @type {number|null} epoch ms when the countdown ends */
     countdownEndsAt: null,
@@ -182,16 +218,21 @@ export function selectIsHost(state) {
   return state.role === "host";
 }
 
-/** @returns {boolean} both seats filled and both peers currently connected */
-export function selectRoomIsFull(state) {
+/** @returns {boolean} every seated player is currently connected */
+export function selectAllConnected(state) {
   const ids = state.playerOrder;
-  return ids.length === 2 && ids.every((id) => state.players[id]?.connected);
+  return ids.length > 0 && ids.every((id) => state.players[id]?.connected);
 }
 
-/** @returns {boolean} everyone present has marked themselves ready */
+/**
+ * @returns {boolean} everyone present has marked themselves ready
+ *
+ * Seat count is checked by canStart(), not here — this answers only "is anyone
+ * still deciding?", which is what the lobby hint needs.
+ */
 export function selectEveryoneReady(state) {
   const ids = state.playerOrder;
-  return ids.length === 2 && ids.every((id) => state.players[id]?.ready);
+  return ids.length > 0 && ids.every((id) => state.players[id]?.ready);
 }
 
 /**

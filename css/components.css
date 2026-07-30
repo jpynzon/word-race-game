@@ -255,15 +255,36 @@
       box-shadow var(--dur-slow) var(--ease-boing);
   }
 
-  /* The two tiles lean away from each other, like a standoff. */
-  .tile--a {
+  /* One ink per seat, and alternating tilts so a row of tiles leans away from
+     itself like a line-up rather than sitting in a neat rank. Four seats is the
+     ceiling any mode allows. */
+  .tile--seat-0,
+  .player--seat-0 {
     --player-ink: var(--ink-pink);
     --tile-tilt: var(--tilt-a);
   }
 
-  .tile--b {
+  .tile--seat-1,
+  .player--seat-1 {
     --player-ink: var(--ink-blue);
     --tile-tilt: var(--tilt-b);
+  }
+
+  .tile--seat-2,
+  .player--seat-2 {
+    --player-ink: var(--ink-mint);
+    --tile-tilt: var(--tilt-a);
+  }
+
+  .tile--seat-3,
+  .player--seat-3 {
+    --player-ink: var(--ink-tangerine);
+    --tile-tilt: var(--tilt-b);
+  }
+
+  .player--seat-1 .player__chip,
+  .player--seat-3 .player__chip {
+    transform: rotate(var(--tilt-b));
   }
 
   .tile__glyph {
@@ -276,41 +297,42 @@
   }
 
   /* ==== The bridge ======================================================
-     THE SIGNATURE. Two ink bands reach out from behind the tiles and overlap
-     in the gap between them; `mix-blend-mode: multiply` turns that overlap
-     into --overprint. It marks the exact spot where the two players' letters
-     join to make one word, which is the whole idea of the game.
+     THE SIGNATURE. One ink band per player, laid in a row behind the tiles.
+     Neighbouring bands overlap and `mix-blend-mode: multiply` turns each seam
+     into a darker overprint — marking the exact spots where the players'
+     letters join to make one word, which is the whole idea of the game.
 
-     These bands deliberately live in .standoff rather than inside the tiles.
-     A tile carries `transform: rotate()`, which makes it a stacking context,
-     and two blended layers in separate stacking contexts can never blend with
-     each other. Keeping the bands as siblings is what makes the effect work. */
-  .bridge__ink {
+     One band per player rather than a fixed pair, so a two-player duel gets a
+     single overprint seam in the middle and a four-player letter hunt gets
+     three. The effect scales with the roster instead of being special-cased.
+
+     The bands deliberately live outside the tiles. A tile carries
+     `transform: rotate()`, which makes it a stacking context, and two blended
+     layers in separate stacking contexts can never blend with each other.
+
+     `isolation` keeps the multiply inside this row: the first band renders
+     normally against the transparent group, and only the overlaps darken. */
+  .bridge {
     position: absolute;
     z-index: 0; /* below the tiles, which sit at z-index 1 */
+    inset-inline: calc(var(--tile-size) * 0.28);
     inset-block-start: 50%;
     height: calc(var(--tile-size) * 0.2);
     margin-block-start: calc(var(--tile-size) * -0.1); /* margin, not transform */
-    inline-size: calc(
-      var(--bridge-gap) / 2 + var(--bridge-tuck) + var(--bridge-overlap)
-    );
-    /* Outlined like everything else here. Only the stretch crossing the gap is
-       visible — the ends are tucked behind the tiles — so what reads is a
-       printed bar running from one tile to the other. */
-    border: var(--stroke) solid var(--ink);
-    border-radius: var(--radius-sm);
-    mix-blend-mode: multiply;
+    display: flex;
+    isolation: isolate;
     pointer-events: none;
   }
 
-  .bridge__ink--a {
-    inset-inline-start: calc(50% - var(--bridge-gap) / 2 - var(--bridge-tuck));
-    background-color: var(--ink-pink);
-  }
-
-  .bridge__ink--b {
-    inset-inline-start: calc(50% - var(--bridge-overlap));
-    background-color: var(--ink-blue);
+  .bridge__seg {
+    flex: 1 1 0;
+    min-inline-size: 0;
+    /* Negative margins are what create the overlap, and therefore the seams. */
+    margin-inline: calc(-1 * var(--bridge-overlap));
+    background-color: var(--player-ink);
+    border: var(--stroke) solid var(--ink);
+    border-radius: var(--radius-sm);
+    mix-blend-mode: multiply;
   }
 
   .tile__role {
@@ -535,14 +557,6 @@
     transform: rotate(var(--tilt-a));
   }
 
-  .player--b {
-    --player-ink: var(--ink-blue);
-  }
-
-  .player--b .player__chip {
-    transform: rotate(var(--tilt-b));
-  }
-
   .player__body {
     display: grid;
     gap: 1px;
@@ -634,6 +648,21 @@
 
   .badge--you {
     background-color: var(--ink-tangerine);
+  }
+
+  .badge--duelling {
+    background-color: var(--ink-mint);
+  }
+
+  /* The observer banner. Dashed like a cut line, because you are outside the
+     round looking in. */
+  .board__watching {
+    padding: var(--space-2) var(--space-4);
+    font-weight: 800;
+    color: var(--ink);
+    background-color: var(--paper-deep);
+    border: var(--stroke-thin) dashed var(--ink-faint);
+    border-radius: var(--radius-pill);
   }
 
   /* ==== Timer ============================================================ */
@@ -734,6 +763,199 @@
     border: var(--stroke) solid var(--ink);
     border-radius: var(--radius-lg);
     box-shadow: var(--offset-lg);
+  }
+
+  /* ==== Spectator feed ==================================================
+     Live duellist activity, shown only to players watching a round. A length,
+     rendered as a shape: you can see someone is eight letters in without
+     learning a single letter of it. */
+  .feed {
+    display: grid;
+    gap: var(--space-2);
+    inline-size: 100%;
+    max-inline-size: var(--measure);
+    margin-block-start: var(--space-3);
+  }
+
+  .feed__row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-4);
+    background-color: var(--paper);
+    border: var(--stroke-thin) solid var(--ink);
+    border-radius: var(--radius-pill);
+    box-shadow: var(--offset-sm);
+  }
+
+  .feed__name {
+    font-family: var(--font-display);
+    font-size: var(--text-base);
+    font-weight: 700;
+    color: var(--ink);
+    flex: 0 0 auto;
+    min-inline-size: 4.5ch;
+  }
+
+  .feed__pips {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    min-height: 0.75rem;
+  }
+
+  /* Each pip is one character typed, inked in the duellist's own colour. */
+  .feed__pip {
+    inline-size: 0.5rem;
+    height: 0.75rem;
+    flex: 0 0 auto;
+    border: 1.5px solid var(--ink);
+    border-radius: 2px;
+    background-color: var(--player-ink);
+    animation: pip-in var(--dur-base) var(--ease-boing) both;
+  }
+
+  .feed__state {
+    font-size: var(--text-xs);
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wide);
+    color: var(--ink-soft);
+    flex: 0 0 auto;
+  }
+
+  .feed__tries {
+    background-color: var(--ink-sun);
+    flex: 0 0 auto;
+  }
+
+  /* ==== Settings ========================================================
+     Match rules in the lobby. The host gets these as controls; everyone else
+     sees the same values as text. */
+  .settings {
+    text-align: start;
+  }
+
+  .settings__mode {
+    margin-block: var(--space-1) var(--space-2);
+  }
+
+  .settings__group {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    margin-block-start: var(--space-5);
+  }
+
+  .settings__legend {
+    padding: 0;
+    font-family: var(--font-body);
+    font-size: var(--text-xs);
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
+    color: var(--ink-soft);
+  }
+
+  .settings__hint {
+    margin-block: var(--space-1) var(--space-3);
+  }
+
+  .settings__choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-block-start: var(--space-2);
+  }
+
+  .settings__facts {
+    display: grid;
+    gap: var(--space-1);
+    margin-block: var(--space-4) var(--space-3);
+    font-size: var(--text-sm);
+    font-weight: 700;
+  }
+
+  .settings__facts li::before {
+    content: "· ";
+    color: var(--ink-faint);
+  }
+
+  .settings__who {
+    color: var(--ink-faint);
+  }
+
+  /* A radio styled as a sticker chip. The input stays in the accessibility tree
+     and keeps arrow-key navigation; only its painted box is replaced. */
+  .choice {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .choice__input {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  .choice__input:disabled {
+    cursor: not-allowed;
+  }
+
+  .choice__face {
+    display: grid;
+    justify-items: center;
+    gap: 1px;
+    min-height: 2.75rem;
+    padding: var(--space-2) var(--space-4);
+    font-family: var(--font-display);
+    font-size: var(--text-base);
+    font-weight: 700;
+    text-align: center;
+    background-color: var(--paper);
+    border: var(--stroke-thin) solid var(--ink);
+    border-radius: var(--radius-pill);
+    transition:
+      transform var(--dur-base) var(--ease-boing),
+      background-color var(--dur-base) var(--ease-out),
+      box-shadow var(--dur-base) var(--ease-boing);
+  }
+
+  .choice__sublabel {
+    font-family: var(--font-body);
+    font-size: 0.6875rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wide);
+    color: var(--ink-soft);
+  }
+
+  .choice__input:checked + .choice__face {
+    background-color: var(--ink-sun);
+    box-shadow: var(--offset-sm);
+    transform: rotate(var(--tilt-b));
+  }
+
+  .choice__input:hover:not(:disabled):not(:checked) + .choice__face {
+    background-color: var(--paper-deep);
+  }
+
+  .choice__input:focus-visible + .choice__face {
+    outline: 3px solid var(--ink-blue);
+    outline-offset: 3px;
+  }
+
+  .choice__input:disabled + .choice__face {
+    opacity: 0.35;
+    border-style: dashed;
+  }
+
+  .choice__input:checked:disabled + .choice__face {
+    opacity: 0.6;
   }
 
   /* ==== Divider =========================================================

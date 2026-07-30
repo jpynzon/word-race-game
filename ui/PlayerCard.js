@@ -27,8 +27,11 @@ function describeStatus(player) {
  *   seatIndex: number,
  *   isLocal?: boolean,
  *   showScore?: boolean,
- *   score?: number
- * }} options
+ *   score?: number,
+ *   turnStatus?: "duelling"|"watching"|null
+ * }} options `turnStatus` is about this round (named apart from the connection
+ *   status below), and is only passed when some players are benched — a mode
+ *   where everyone plays should not label everybody redundantly.
  * @returns {HTMLLIElement}
  */
 export function renderPlayerCard({
@@ -37,10 +40,11 @@ export function renderPlayerCard({
   isLocal = false,
   showScore = false,
   score = 0,
+  turnStatus = null,
 }) {
   const row = document.createElement("li");
-  // Seat 0 is Player A (pink), seat 1 is Player B (blue).
-  row.className = seatIndex === 1 ? "player player--b" : "player";
+  // Seat colour is positional: pink, blue, mint, tangerine.
+  row.className = `player player--seat-${seatIndex}`;
 
   if (!player) {
     row.classList.add("player--vacant");
@@ -85,6 +89,12 @@ export function renderPlayerCard({
     you.className = "badge badge--you";
     you.textContent = "You";
     meta.append(you);
+  }
+  if (turnStatus) {
+    const tag = document.createElement("span");
+    tag.className = turnStatus === "duelling" ? "badge badge--duelling" : "badge";
+    tag.textContent = turnStatus === "duelling" ? "Duelling" : "Watching";
+    meta.append(tag);
   }
 
   body.append(name, meta);

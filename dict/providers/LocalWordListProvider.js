@@ -81,6 +81,59 @@ export function createLocalWordListProvider({ url = LOCAL_WORDLIST_URL } = {}) {
       return bridges.has(`${start}${end}`);
     },
 
+    /**
+     * Whether any known word contains every one of these letters.
+     *
+     * Precomputing this is not an option — four letters from an alphabet of 26
+     * is far too many combinations to index — so it scans the list. A linear
+     * pass over 37k words with an early bail on the first missing letter runs
+     * in a couple of milliseconds, which is nothing next to the dictionary
+     * round trip it prevents.
+     *
+     * Four random letters share no word surprisingly often, so this check is
+     * what stops the letter-hunt mode dealing hands nobody can win.
+     *
+     * @param {string[]} letters required letters
+     * @param {number} [minLength] the round's minimum word length
+     * @returns {boolean} false only when we positively know it is unplayable
+     */
+    hasWordContaining(letters, minLength = 2) {
+      if (!words) return true; // unknown: assume playable rather than block a round
+      const required = [...new Set(letters.map((l) => String(l).toLowerCase()))];
+      if (required.length === 0) return true;
+
+      for (const word of words) {
+        if (word.length < minLength) continue;
+        let missing = false;
+        for (const letter of required) {
+          if (!word.includes(letter)) {
+            missing = true;
+            break;
+          }
+        }
+        if (!missing) return true;
+      }
+      return false;
+    },
+
+    /**
+     * An example word satisfying a letter set. Used to explain a re-deal and,
+     * eventually, to offer a hint.
+     *
+     * @param {string[]} letters
+     * @param {number} [minLength]
+     * @returns {string|null}
+     */
+    findWordContaining(letters, minLength = 2) {
+      if (!words) return null;
+      const required = [...new Set(letters.map((l) => String(l).toLowerCase()))];
+      for (const word of words) {
+        if (word.length < minLength) continue;
+        if (required.every((letter) => word.includes(letter))) return word;
+      }
+      return null;
+    },
+
     /** @returns {number} */
     size() {
       return words?.size ?? 0;

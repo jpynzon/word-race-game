@@ -1,6 +1,7 @@
-import { CONNECTION, MAX_PLAYERS, ROLE } from "../js/constants.js";
+import { CONNECTION, ROLE } from "../js/constants.js";
 import { selectEveryoneReady, selectLocalPlayer } from "../js/state.js";
 import { renderPlayerCard } from "../ui/PlayerCard.js";
+import { canStart, capacityFor } from "./GameSettings.js";
 
 /**
  * Renders the lobby: room code, both seats, and whatever the local player is
@@ -36,9 +37,14 @@ export function createLobbyManager({ store, dom, actions }) {
     );
   }
 
+  /**
+   * One row per seat the current mode allows, so the empty rows tell you how
+   * many more players the room is waiting for.
+   */
   function renderPlayers(state) {
     dom.players.replaceChildren();
-    for (let seat = 0; seat < MAX_PLAYERS; seat += 1) {
+    const seats = capacityFor(state.match.settings.mode).max;
+    for (let seat = 0; seat < seats; seat += 1) {
       const id = state.playerOrder[seat];
       dom.players.append(
         renderPlayerCard({
@@ -67,7 +73,10 @@ export function createLobbyManager({ store, dom, actions }) {
     if (!local) return;
 
     const isHost = local.role === ROLE.HOST;
-    const bothPresent = state.playerOrder.length === MAX_PLAYERS;
+    const enoughPlayers = canStart(
+      state.match.settings.mode,
+      state.playerOrder.length,
+    ).ok;
     const everyoneReady = selectEveryoneReady(state);
 
     dom.actions.append(
@@ -81,7 +90,7 @@ export function createLobbyManager({ store, dom, actions }) {
       dom.actions.append(
         button("Start the match", {
           variant: "btn--primary",
-          disabled: !bothPresent || !everyoneReady,
+          disabled: !enoughPlayers || !everyoneReady,
           onClick: actions.startGame,
         }),
       );
@@ -99,16 +108,18 @@ export function createLobbyManager({ store, dom, actions }) {
   function renderHint(state) {
     const local = selectLocalPlayer(state);
     const isHost = local?.role === ROLE.HOST;
-    const bothPresent = state.playerOrder.length === MAX_PLAYERS;
+    const seatCheck = canStart(state.match.settings.mode, state.playerOrder.length);
 
     if (state.connection === CONNECTION.CONNECTING) {
       dom.hint.textContent = "Connecting…";
       return;
     }
-    if (!bothPresent) {
+    if (!seatCheck.ok) {
+      // canStart() already phrases how many more players are needed; the host
+      // additionally gets told what to do about it.
       dom.hint.textContent = isHost
-        ? "Send the code or the invite link to your opponent."
-        : "Waiting for the other player to reconnect.";
+        ? `${seatCheck.message} Send the code or the invite link.`
+        : seatCheck.message;
       return;
     }
     if (!selectEveryoneReady(state)) {

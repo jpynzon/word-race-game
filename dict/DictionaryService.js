@@ -102,6 +102,30 @@ export function createDictionaryService({ providers } = {}) {
       return local.hasBridge(start, end);
     },
 
+    /**
+     * Whether any known word contains every one of these letters. The oracle for
+     * the letter-hunt mode, where four random letters often share no word.
+     *
+     * @param {string[]} letters
+     * @param {number} [minLength]
+     * @returns {boolean} false only when we positively know it is unplayable
+     */
+    hasWordContaining(letters, minLength = 2) {
+      if (!local || !local.isReady()) return true;
+      return local.hasWordContaining(letters, minLength);
+    },
+
+    /**
+     * An example word satisfying a letter set, or null.
+     * @param {string[]} letters
+     * @param {number} [minLength]
+     * @returns {string|null}
+     */
+    findWordContaining(letters, minLength = 2) {
+      if (!local || !local.isReady()) return null;
+      return local.findWordContaining(letters, minLength);
+    },
+
     /** @returns {object} state for the end-to-end checks */
     diagnostics() {
       return {

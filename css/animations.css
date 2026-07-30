@@ -19,11 +19,13 @@
     }
   }
 
-  .standoff--idle .tile--a {
+  .standoff--idle .tile--seat-0,
+  .standoff--idle .tile--seat-2 {
     animation: idle-a 4.2s var(--ease-in-out) infinite;
   }
 
-  .standoff--idle .tile--b {
+  .standoff--idle .tile--seat-1,
+  .standoff--idle .tile--seat-3 {
     animation: idle-b 4.2s var(--ease-in-out) infinite;
     animation-delay: -2.1s; /* opposite phase */
   }
@@ -63,13 +65,18 @@
     animation: stamp 1s var(--ease-boing) both;
   }
 
-  /* Named sides, not positional selectors: board tiles are each wrapped in a
-     slot, so :first-of-type would match both. */
-  .standoff--tense .tile--a {
+  /* Seat classes, not positional selectors: board tiles are each wrapped in a
+     slot, so :first-of-type would match every one of them. */
+  .standoff--tense .tile--seat-0 {
     --converge-x: 0.6rem;
   }
 
-  .standoff--tense .tile--b {
+  .standoff--tense .tile--seat-1,
+  .standoff--tense .tile--seat-2 {
+    --converge-x: 0rem;
+  }
+
+  .standoff--tense .tile--seat-3 {
     --converge-x: -0.6rem;
   }
 
@@ -90,16 +97,19 @@
     }
   }
 
-  /* The bridge bands grow out from the centre as the letters land, so the
-     overprint appears at the same moment the two letters become one rule.
-     Animating inline-size keeps both bands out of their own stacking contexts;
-     a scale transform would isolate each one and kill the multiply. */
+  /* The bridge grows out from the centre as the letters land, so the overprint
+     seams appear at the same moment the letters become one rule.
+     The transform goes on the .bridge row, never on an individual band: a
+     transformed band would become its own stacking context and its multiply
+     would stop blending with its neighbours. The row already carries
+     `isolation: isolate`, so transforming it changes nothing about the blend. */
   @keyframes bridge-grow {
     0% {
-      inline-size: var(--bridge-overlap);
+      transform: scaleX(0.15);
       opacity: 0;
     }
     100% {
+      transform: scaleX(1);
       opacity: 1;
     }
   }
@@ -113,7 +123,7 @@
     animation: flap var(--dur-flap) var(--ease-flap) both;
   }
 
-  .standoff--reveal.is-revealing .bridge__ink {
+  .standoff--reveal.is-revealing .bridge {
     animation: bridge-grow var(--dur-flap) var(--ease-out) both;
   }
 
@@ -177,6 +187,19 @@
     background-color: var(--player-ink);
     animation: confetti-fall var(--fall, 2.4s) var(--ease-in-out) both;
     animation-delay: var(--delay, 0ms);
+  }
+
+  /* A pip landing as a spectator watches someone type. Small and quick — it
+     fires per character, so anything showier would be noise. */
+  @keyframes pip-in {
+    0% {
+      transform: scaleY(0.2);
+      opacity: 0;
+    }
+    100% {
+      transform: scaleY(1);
+      opacity: 1;
+    }
   }
 
   /* ---- Functional feedback ------------------------------------------- */

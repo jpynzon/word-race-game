@@ -58,6 +58,19 @@ const PAYLOAD_RULES = Object.freeze({
 
   [MSG.WORD_REJECTED]: (p) => isNonEmptyString(p.reason, 64),
 
+  // Length only. If a `word` field ever appeared here it would be a leak, so the
+  // shape check is also the guarantee that no text is travelling.
+  [MSG.ACTIVITY]: (p) =>
+    Number.isInteger(p.length) &&
+    p.length >= 0 &&
+    p.length <= MAX_WORD_LENGTH &&
+    Number.isInteger(p.roundId),
+
+  [MSG.ACTIVITY_RELAY]: (p) =>
+    isNonEmptyString(p.playerId, 64) &&
+    Number.isInteger(p.length) &&
+    Number.isInteger(p.attempts),
+
   [MSG.ROOM_CLOSED]: (p) => isNonEmptyString(p.code, 64),
 
   [MSG.PING]: (p) => Number.isFinite(p.id),

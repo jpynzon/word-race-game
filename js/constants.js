@@ -16,8 +16,53 @@ export const PEER_ID_PREFIX = "wordrace-v1-";
 /** How many times to retry with a fresh code when the broker says the id is taken. */
 export const MAX_ROOM_CODE_ATTEMPTS = 6;
 
-export const MAX_PLAYERS = 2;
+/** The largest room any mode allows. Seat arrays and the lobby size to this. */
+export const MAX_PLAYERS = 4;
 export const MAX_NAME_LENGTH = 14;
+
+/* ---- Game modes ---------------------------------------------------------
+   Two ways to build the rule from the players' letters. Both share the same
+   settings, the same timer, and the same scoring — only the shape of the rule
+   and the seat count differ. */
+
+export const GAME_MODE = Object.freeze({
+  /** Two players. The word starts with one letter and ends with the other. */
+  DUEL: "duel",
+  /** Three or four players. The word must contain every player's letter. */
+  CONTAINS: "contains",
+  /**
+   * Two to four players. Same rule as a duel, but only two play each round
+   * while the rest watch, and the pairing rotates so everyone faces everyone.
+   */
+  ROUND_ROBIN: "round-robin",
+});
+
+/** Seat counts each mode supports. */
+export const MODE_CAPACITY = Object.freeze({
+  [GAME_MODE.DUEL]: { min: 2, max: 2 },
+  [GAME_MODE.CONTAINS]: { min: 3, max: 4 },
+  [GAME_MODE.ROUND_ROBIN]: { min: 2, max: 4 },
+});
+
+/* ---- Host-configurable settings ----------------------------------------
+   Defaults and bounds live here; game/GameSettings.js owns validation. Bounds
+   exist because these arrive over the network from the host and a hostile or
+   buggy peer must not be able to set a zero-second timer. */
+
+/** Offered as discrete choices rather than a free number: a slider inviting
+ *  someone to pick 7 seconds helps nobody. */
+export const RACE_DURATION_CHOICES_MS = Object.freeze([
+  15_000, 30_000, 45_000, 60_000, 90_000,
+]);
+
+export const RACE_DURATION_BOUNDS_MS = Object.freeze({ min: 10_000, max: 180_000 });
+export const MIN_WORD_LENGTH_BOUNDS = Object.freeze({ min: 2, max: 10 });
+
+export const DEFAULT_SETTINGS = Object.freeze({
+  mode: GAME_MODE.DUEL,
+  raceDurationMs: 30_000,
+  minWordLength: 2,
+});
 
 /* ---- Round timing ------------------------------------------------------- */
 
@@ -94,6 +139,12 @@ export const POINTS_PER_ROUND_WIN = 1;
 
 /* ---- UI ---------------------------------------------------------------- */
 
+/**
+ * How often a duellist reports their word length to the spectators. A message
+ * per keystroke would flood the same channel the race is being decided on.
+ */
+export const ACTIVITY_THROTTLE_MS = 220;
+
 export const TOAST_DURATION_MS = 3_400;
 export const TOAST_EXIT_MS = 200;
 export const MAX_TOASTS = 3;
@@ -153,10 +204,14 @@ export const REJECTION = Object.freeze({
   NOT_ALPHA: "not-alpha",
   WRONG_START: "wrong-start",
   WRONG_END: "wrong-end",
+  /** CONTAINS mode: the word is missing one or more of the required letters. */
+  MISSING_LETTERS: "missing-letters",
   ALREADY_USED: "already-used",
   NOT_A_WORD: "not-a-word",
   WRONG_PHASE: "wrong-phase",
   ROUND_OVER: "round-over",
+  /** Round-robin: this player is observing, not duelling, this round. */
+  NOT_PLAYING: "not-playing",
 });
 
 /** Why the match ended or the connection died. */

@@ -18,8 +18,16 @@ import { envelope, MSG } from "./Protocol.js";
  *  - duplicate suppression
  *  - liveness: a heartbeat that notices a peer which stopped answering without
  *    ever closing its channel
- *  - clock offset estimation, so the host can compare two players' submission
- *    times fairly instead of rewarding whoever has less latency
+ *  - clock offset estimation, so the host can compare players' submission times
+ *    fairly instead of rewarding whoever has the least latency
+ *
+ * MULTI-PEER
+ *
+ * A host can hold up to three guests, so every one of those concerns is tracked
+ * **per peer**. A shared dedupe counter would silently swallow the second
+ * player's messages whenever their sequence numbers happened to lag the first's,
+ * and a shared clock offset would apply one player's latency correction to
+ * everybody. Both are per-peer maps for that reason.
  *
  * Game logic subscribes by message type and never sees an invalid message.
  */
@@ -27,104 +35,136 @@ import { envelope, MSG } from "./Protocol.js";
 /**
  * @param {{
  *   role: "host"|"guest",
+ *   maxPeers?: () => number,
  *   createTransport?: typeof createPeerTransport
  * }} options
  */
-export function createNetworkClient({ role, createTransport = createPeerTransport }) {
+export function createNetworkClient({
+  role,
+  maxPeers = () => 1,
+  createTransport = createPeerTransport,
+}) {
   /** @type {Map<string, Set<Function>>} */
   const handlers = new Map();
-  const dedupe = createDedupe();
   const lifecycle = { open: [], close: [], failure: [] };
 
   let outboundSeq = 0;
-  let lastInboundAt = 0;
   let heartbeatTimer = null;
   let nextPingId = 1;
-  /** @type {Map<number, number>} ping id → local send time */
-  const pendingPings = new Map();
 
-  /** Best (lowest-RTT) offset estimate: peerClock − localClock, in ms. */
-  let peerClockOffsetMs = 0;
-  let bestRttMs = Infinity;
-  let sampleCount = 0;
+  /**
+   * Per-peer bookkeeping. Keyed by the transport's peer id.
+   * @type {Map<string, {
+   *   dedupe: ReturnType<typeof createDedupe>,
+   *   lastInboundAt: number,
+   *   pendingPings: Map<number, number>,
+   *   clockOffsetMs: number,
+   *   bestRttMs: number,
+   *   pingSamples: number
+   * }>}
+   */
+  const peers = new Map();
 
   const droppedByReason = new Map();
 
-  function emitLifecycle(kind, arg) {
-    for (const fn of lifecycle[kind]) fn(arg);
+  function peerState(peerKey) {
+    let entry = peers.get(peerKey);
+    if (!entry) {
+      entry = {
+        dedupe: createDedupe(),
+        lastInboundAt: Date.now(),
+        pendingPings: new Map(),
+        clockOffsetMs: 0,
+        bestRttMs: Infinity,
+        pingSamples: 0,
+      };
+      peers.set(peerKey, entry);
+    }
+    return entry;
   }
 
-  function dispatch(message) {
+  function emitLifecycle(kind, ...args) {
+    for (const fn of lifecycle[kind]) fn(...args);
+  }
+
+  function dispatch(message, peerKey) {
     const set = handlers.get(message.type);
     if (!set) return;
-    for (const fn of [...set]) fn(message.payload, message);
+    for (const fn of [...set]) fn(message.payload, message, peerKey);
   }
 
   /**
-   * Folds one ping/pong round trip into the offset estimate.
+   * Folds one ping/pong round trip into a peer's offset estimate.
    *
-   * Only the lowest-RTT sample is kept. On a jittery link the minimum round
-   * trip is by far the most trustworthy sample, because a fast round trip
-   * cannot have been delayed much in either direction, while a slow one gives
-   * no clue which leg was slow.
+   * Only the lowest-RTT sample is kept. On a jittery link the minimum round trip
+   * is by far the most trustworthy sample: a fast round trip cannot have been
+   * delayed much in either direction, while a slow one gives no clue which leg
+   * was slow.
    */
-  function recordPong(payload) {
-    const sentAt = pendingPings.get(payload.id);
+  function recordPong(peerKey, payload) {
+    const state = peerState(peerKey);
+    const sentAt = state.pendingPings.get(payload.id);
     if (sentAt === undefined) return;
-    pendingPings.delete(payload.id);
+    state.pendingPings.delete(payload.id);
 
-    const now = Date.now();
-    const rtt = now - sentAt;
-    sampleCount += 1;
-    if (rtt >= bestRttMs) return;
+    const rtt = Date.now() - sentAt;
+    state.pingSamples += 1;
+    if (rtt >= state.bestRttMs) return;
 
-    bestRttMs = rtt;
+    state.bestRttMs = rtt;
     // The peer replied at peerTime; assume that happened at the midpoint of the
     // round trip in local terms.
-    peerClockOffsetMs = payload.peerTime - (sentAt + rtt / 2);
+    state.clockOffsetMs = payload.peerTime - (sentAt + rtt / 2);
   }
 
-  function sendPing() {
+  function sendPing(peerKey) {
+    const state = peerState(peerKey);
     const id = nextPingId;
     nextPingId += 1;
-    pendingPings.set(id, Date.now());
+    state.pendingPings.set(id, Date.now());
     // Keep the map from growing on a link that never answers.
-    if (pendingPings.size > PING_SAMPLE_COUNT * 4) {
-      pendingPings.delete(pendingPings.keys().next().value);
+    if (state.pendingPings.size > PING_SAMPLE_COUNT * 4) {
+      state.pendingPings.delete(state.pendingPings.keys().next().value);
     }
-    transport.send(envelope(MSG.PING, { id }));
+    transport.sendTo(peerKey, envelope(MSG.PING, { id }));
   }
 
   function startHeartbeat() {
-    stopHeartbeat();
-    lastInboundAt = Date.now();
+    if (heartbeatTimer !== null) return;
     heartbeatTimer = setInterval(() => {
-      if (!transport.isConnected()) return;
-      // A silent peer is a lost peer: the channel can stay nominally open long
-      // after the tab it belongs to has gone away.
-      //
-      // Dropping the transport's connection here is essential, not tidy-up. The
-      // close event we never received would have freed the slot; concluding the
-      // peer is gone without freeing it leaves the transport holding a corpse,
-      // and it then refuses the returning player's reconnect as "room full".
-      if (Date.now() - lastInboundAt > HEARTBEAT_TIMEOUT_MS) {
-        stopHeartbeat();
-        transport.dropConnection?.();
-        emitLifecycle("close");
-        return;
+      for (const peerKey of transport.peerKeys()) {
+        const state = peerState(peerKey);
+
+        // A silent peer is a lost peer: the channel can stay nominally open long
+        // after the tab it belongs to has gone away.
+        //
+        // Dropping the transport's connection here is essential, not tidy-up.
+        // The close event we never received would have freed the seat;
+        // concluding the peer is gone without freeing it leaves the transport
+        // holding a corpse, and it then refuses that player's reconnect as
+        // "room full".
+        if (Date.now() - state.lastInboundAt > HEARTBEAT_TIMEOUT_MS) {
+          transport.dropConnection(peerKey);
+          peers.delete(peerKey);
+          emitLifecycle("close", peerKey);
+          continue;
+        }
+        sendPing(peerKey);
       }
-      sendPing();
     }, HEARTBEAT_INTERVAL_MS);
   }
 
   function stopHeartbeat() {
-    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    if (heartbeatTimer !== null) clearInterval(heartbeatTimer);
     heartbeatTimer = null;
   }
 
   const transport = createTransport({
-    onData(raw) {
-      lastInboundAt = Date.now();
+    maxPeers,
+
+    onData(raw, peerKey) {
+      const state = peerState(peerKey);
+      state.lastInboundAt = Date.now();
 
       const result = validateMessage(raw, role);
       if (!result.ok) {
@@ -136,32 +176,37 @@ export function createNetworkClient({ role, createTransport = createPeerTranspor
 
       // Liveness traffic is handled here and never reaches game logic.
       if (message.type === MSG.PING) {
-        transport.send(
+        transport.sendTo(
+          peerKey,
           envelope(MSG.PONG, { id: message.payload.id, peerTime: Date.now() }),
         );
         return;
       }
       if (message.type === MSG.PONG) {
-        recordPong(message.payload);
+        recordPong(peerKey, message.payload);
         return;
       }
 
-      if (!dedupe.accept("peer", message)) return;
-      dispatch(message);
+      if (!state.dedupe.accept(peerKey, message)) return;
+      dispatch(message, peerKey);
     },
 
-    onPeerOpen() {
+    onPeerOpen(peerKey) {
+      peerState(peerKey).lastInboundAt = Date.now();
       startHeartbeat();
       // Front-load the offset samples so the first round already has an estimate.
       for (let i = 0; i < PING_SAMPLE_COUNT; i += 1) {
-        setTimeout(sendPing, i * 120);
+        setTimeout(() => {
+          if (transport.isConnected(peerKey)) sendPing(peerKey);
+        }, i * 120);
       }
-      emitLifecycle("open");
+      emitLifecycle("open", peerKey);
     },
 
-    onPeerClose() {
-      stopHeartbeat();
-      emitLifecycle("close");
+    onPeerClose(peerKey) {
+      peers.delete(peerKey);
+      if (transport.peerKeys().length === 0) stopHeartbeat();
+      emitLifecycle("close", peerKey);
     },
 
     onFailure(code) {
@@ -186,9 +231,11 @@ export function createNetworkClient({ role, createTransport = createPeerTranspor
     },
 
     /**
+     * Broadcasts to every peer.
+     *
      * @param {string} type one of MSG
      * @param {object} [payload]
-     * @returns {boolean} whether the message reached the transport
+     * @returns {number} how many peers it reached
      */
     send(type, payload = {}) {
       outboundSeq += 1;
@@ -196,8 +243,23 @@ export function createNetworkClient({ role, createTransport = createPeerTranspor
     },
 
     /**
+     * Sends to one peer. Used for anything addressed to a single player, like
+     * telling them why their word was refused — the others have no business
+     * seeing what someone else tried.
+     *
+     * @param {string} peerKey
+     * @param {string} type
+     * @param {object} [payload]
+     * @returns {boolean}
+     */
+    sendTo(peerKey, type, payload = {}) {
+      outboundSeq += 1;
+      return transport.sendTo(peerKey, envelope(type, payload, outboundSeq));
+    },
+
+    /**
      * @param {string} type one of MSG
-     * @param {(payload: object, message: object) => void} handler
+     * @param {(payload: object, message: object, peerKey: string) => void} handler
      * @returns {() => void} unsubscribe
      */
     on(type, handler) {
@@ -214,53 +276,82 @@ export function createNetworkClient({ role, createTransport = createPeerTranspor
     },
 
     /**
-     * Converts a timestamp taken on the peer's clock into local time.
+     * Converts a timestamp taken on a peer's clock into local time.
      *
-     * Best-effort by construction: without a shared time source the estimate
-     * can only ever be as good as the link's minimum round trip. Good enough to
-     * stop latency deciding rounds; not good enough to arbitrate a photo finish,
+     * Best-effort by construction: without a shared time source the estimate can
+     * only ever be as good as the link's minimum round trip. Good enough to stop
+     * latency deciding rounds; not good enough to arbitrate a photo finish,
      * which is why arrival order remains the tiebreaker.
      *
+     * @param {string} peerKey
      * @param {number} peerTimestamp
      * @returns {number} the equivalent local timestamp
      */
-    toLocalTime(peerTimestamp) {
-      return peerTimestamp - peerClockOffsetMs;
-    },
-
-    /** @returns {number|null} best round-trip estimate, or null if unmeasured */
-    latencyMs() {
-      return Number.isFinite(bestRttMs) ? Math.round(bestRttMs) : null;
-    },
-
-    /** @returns {boolean} */
-    isConnected() {
-      return transport.isConnected();
+    toLocalTime(peerKey, peerTimestamp) {
+      const state = peers.get(peerKey);
+      return peerTimestamp - (state?.clockOffsetMs ?? 0);
     },
 
     /**
-     * Drops the peer link while keeping the room open, so the seat is free for
-     * whoever connects next.
+     * @param {string} [peerKey] omit for the best across all peers
+     * @returns {number|null} round-trip estimate in ms, or null if unmeasured
      */
-    dropPeer() {
-      stopHeartbeat();
-      transport.dropConnection?.();
+    latencyMs(peerKey) {
+      if (peerKey !== undefined) {
+        const rtt = peers.get(peerKey)?.bestRttMs;
+        return Number.isFinite(rtt) ? Math.round(rtt) : null;
+      }
+      const all = [...peers.values()].map((p) => p.bestRttMs).filter(Number.isFinite);
+      return all.length ? Math.round(Math.min(...all)) : null;
     },
 
-    /** @returns {object} counters for the diagnostics in each phase's verification */
+    /** @param {string} [peerKey] @returns {boolean} */
+    isConnected(peerKey) {
+      return transport.isConnected(peerKey);
+    },
+
+    /** @returns {string[]} live peer ids */
+    peerKeys() {
+      return transport.peerKeys();
+    },
+
+    /**
+     * Drops one peer link, or all, while keeping the room open.
+     * @param {string} [peerKey]
+     */
+    dropPeer(peerKey) {
+      transport.dropConnection?.(peerKey);
+      if (peerKey === undefined) {
+        peers.clear();
+        stopHeartbeat();
+      } else {
+        peers.delete(peerKey);
+      }
+    },
+
+    /** @returns {object} counters for the end-to-end verification */
     diagnostics() {
       return {
         role,
         outboundSeq,
-        offsetMs: Math.round(peerClockOffsetMs),
-        bestRttMs: Number.isFinite(bestRttMs) ? Math.round(bestRttMs) : null,
-        pingSamples: sampleCount,
+        peerCount: transport.peerKeys().length,
+        peers: Object.fromEntries(
+          [...peers].map(([key, p]) => [
+            key,
+            {
+              offsetMs: Math.round(p.clockOffsetMs),
+              bestRttMs: Number.isFinite(p.bestRttMs) ? Math.round(p.bestRttMs) : null,
+              pingSamples: p.pingSamples,
+            },
+          ]),
+        ),
         dropped: Object.fromEntries(droppedByReason),
       };
     },
 
     close() {
       stopHeartbeat();
+      peers.clear();
       transport.close();
     },
   };

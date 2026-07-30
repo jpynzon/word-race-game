@@ -1,4 +1,4 @@
-import { PHASE, SCREEN } from "./constants.js";
+import { ACTIVITY_THROTTLE_MS, PHASE, SCREEN } from "./constants.js";
 import { describeRejection } from "./messages.js";
 import { createProfileStore, sanitiseName } from "./profile.js";
 import { createRouter, isValidRoomCode } from "./router.js";
@@ -8,6 +8,7 @@ import { createLobbyManager } from "../game/LobbyManager.js";
 import { createBoard } from "../ui/Board.js";
 import { createHeroDemo } from "../ui/HeroDemo.js";
 import { createScreens } from "../ui/Screen.js";
+import { createSettingsPanel } from "../ui/SettingsPanel.js";
 import { createAnnouncer, createToaster } from "../ui/Toast.js";
 
 /**
@@ -33,6 +34,7 @@ function boot() {
     lobbyPlayers: document.getElementById("lobby-players"),
     lobbyActions: document.getElementById("lobby-actions"),
     lobbyHint: document.getElementById("lobby-hint"),
+    lobbySettings: document.getElementById("lobby-settings"),
     errorLabel: document.getElementById("error-code"),
     errorTitle: document.getElementById("error-title"),
     errorDetail: document.getElementById("error-detail"),
@@ -41,8 +43,8 @@ function boot() {
     scoreboard: document.getElementById("scoreboard"),
     phaseLabel: document.getElementById("phase-label"),
     standoff: document.getElementById("board-standoff"),
-    slotA: document.getElementById("slot-a"),
-    slotB: document.getElementById("slot-b"),
+    tiles: document.getElementById("board-tiles"),
+    bridge: document.getElementById("board-bridge"),
     rule: document.getElementById("board-rule"),
     wordForm: document.getElementById("word-form"),
     wordInput: document.getElementById("word-input"),
@@ -91,6 +93,7 @@ function boot() {
     navigate,
     profile,
     onWordRejected: (reason) => board?.rejectWord(describeRejection(reason)),
+    onSpectatorActivity: (update) => board?.showActivity(update),
   });
 
   board = createBoard({
@@ -98,8 +101,8 @@ function boot() {
       scoreboard: dom.scoreboard,
       phaseLabel: dom.phaseLabel,
       standoff: dom.standoff,
-      slotA: dom.slotA,
-      slotB: dom.slotB,
+      tiles: dom.tiles,
+      bridge: dom.bridge,
       rule: dom.rule,
       wordForm: dom.wordForm,
       wordInput: dom.wordInput,
@@ -116,6 +119,11 @@ function boot() {
       restartMatch: () => game.restartMatch(),
       returnToLobby: () => game.returnToLobby(),
     },
+  });
+
+  const settingsPanel = createSettingsPanel({
+    root: dom.lobbySettings,
+    onChange: (patch) => game.updateSettings(patch),
   });
 
   const lobby = createLobbyManager({
@@ -148,7 +156,10 @@ function boot() {
       navigate(SCREEN.LOBBY);
     }
 
-    if (state.screen === SCREEN.LOBBY) lobby.render(state);
+    if (state.screen === SCREEN.LOBBY) {
+      lobby.render(state);
+      settingsPanel.render(state);
+    }
     if (state.screen === SCREEN.GAME) board.render(state);
     if (state.screen === SCREEN.ERROR) renderFailure(state);
   });
@@ -160,6 +171,22 @@ function boot() {
     const word = dom.wordInput.value.trim();
     if (word.length === 0) return;
     game.submitWord(word);
+  });
+
+  /* Typing activity for the spectators. Throttled and length-only: a message per
+     keystroke would flood the channel a race is being decided on, and the text
+     itself must never leave this tab. */
+  let activityTimer = null;
+  let lastReportedLength = -1;
+  dom.wordInput.addEventListener("input", () => {
+    const length = dom.wordInput.value.trim().length;
+    if (length === lastReportedLength || activityTimer !== null) return;
+    activityTimer = setTimeout(() => {
+      activityTimer = null;
+      const current = dom.wordInput.value.trim().length;
+      lastReportedLength = current;
+      game.reportActivity(current);
+    }, ACTIVITY_THROTTLE_MS);
   });
 
   function renderFailure(state) {

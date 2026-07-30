@@ -188,6 +188,8 @@
 
             <ul class="stack stack--tight" id="lobby-players"></ul>
 
+            <div id="lobby-settings"></div>
+
             <div class="row" id="lobby-actions"></div>
             <p class="note" id="lobby-hint" style="text-align: center"></p>
           </div>
@@ -202,12 +204,14 @@
 
             <p class="eyebrow" id="phase-label">Waiting</p>
 
+            <!-- The rail holds one tile per player, so the same markup serves a
+                 two-player duel and a four-player letter hunt. Board.js fills
+                 both the ink bands and the tiles. -->
             <div class="standoff standoff--bridge standoff--reveal" id="board-standoff">
-              <span class="bridge__ink bridge__ink--a"></span>
-              <span class="bridge__ink bridge__ink--b"></span>
-              <div class="standoff__slot" id="slot-a"></div>
-              <div class="standoff__gap"></div>
-              <div class="standoff__slot" id="slot-b"></div>
+              <div class="standoff__rail">
+                <div class="bridge" id="board-bridge" aria-hidden="true"></div>
+                <div class="standoff__tiles" id="board-tiles"></div>
+              </div>
             </div>
 
             <div class="board__rule" id="board-rule"></div>

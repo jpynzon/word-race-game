@@ -25,6 +25,11 @@ export function createScoreboard({ root }) {
       /** @type {string[]} ids whose score just increased */
       const climbed = [];
 
+      // Only mark who is duelling when somebody is actually benched — in a mode
+      // where everyone plays, tagging everyone "playing" says nothing.
+      const active = state.match.activeIds ?? [];
+      const hasBench = active.length > 0 && active.length < state.playerOrder.length;
+
       for (let seat = 0; seat < MAX_PLAYERS; seat += 1) {
         const id = state.playerOrder[seat];
         if (!id) continue;
@@ -39,6 +44,11 @@ export function createScoreboard({ root }) {
             isLocal: id === state.localPlayerId,
             showScore: true,
             score,
+            turnStatus: hasBench
+              ? active.includes(id)
+                ? "duelling"
+                : "watching"
+              : null,
           }),
         );
       }

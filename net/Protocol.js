@@ -35,9 +35,29 @@ export const MSG = Object.freeze({
   WORD: "word",
   LEAVE: "leave",
 
+  /**
+   * guest → host: "my word is this many characters long right now".
+   *
+   * Length only, never the text. It exists so spectators have something to
+   * watch during a race, and it is relayed ONLY to spectators — see
+   * ACTIVITY_RELAY. It must never enter a snapshot.
+   */
+  ACTIVITY: "activity",
+
   /* host → guest: your word didn't count, and why. Addressed to one player,
      unlike a notice, because only the submitter needs to see it. */
   WORD_REJECTED: "word-rejected",
+
+  /**
+   * host → spectator: live activity from the duellists.
+   *
+   * Sent with sendTo, addressed only at players who are observing this round.
+   * Deliberately NOT part of the snapshot: telling a duellist that their
+   * opponent is six characters in, or has already burned three attempts, would
+   * hand them real competitive information. Spectators cannot submit, so for
+   * them it is pure theatre.
+   */
+  ACTIVITY_RELAY: "activity-relay",
 
   /* host → guest: the room is over */
   ROOM_CLOSED: "room-closed",
@@ -54,6 +74,7 @@ export const GUEST_TO_HOST = Object.freeze([
   MSG.LETTER,
   MSG.WORD,
   MSG.LEAVE,
+  MSG.ACTIVITY,
   MSG.PING,
   MSG.PONG,
 ]);
@@ -64,6 +85,7 @@ export const HOST_TO_GUEST = Object.freeze([
   MSG.REJECT,
   MSG.SNAPSHOT,
   MSG.WORD_REJECTED,
+  MSG.ACTIVITY_RELAY,
   MSG.ROOM_CLOSED,
   MSG.PING,
   MSG.PONG,

@@ -62,7 +62,8 @@ export const FAILURE_COPY = Object.freeze({
 
 /** Why a submitted word did not count. Shown as a toast, mid-race. */
 export const REJECTION_COPY = Object.freeze({
-  [REJECTION.TOO_SHORT]: "Words need at least two letters.",
+  [REJECTION.TOO_SHORT]: "That's shorter than this match allows.",
+  [REJECTION.MISSING_LETTERS]: "Your word is missing one of the letters.",
   [REJECTION.TOO_LONG]: "That's longer than this game accepts.",
   [REJECTION.NOT_ALPHA]: "Letters only — no spaces, digits or punctuation.",
   [REJECTION.WRONG_START]: "That doesn't start with the right letter.",
@@ -70,6 +71,7 @@ export const REJECTION_COPY = Object.freeze({
   [REJECTION.ALREADY_USED]: "That word already won a round.",
   [REJECTION.NOT_A_WORD]: "That isn't in the dictionary.",
   [REJECTION.WRONG_PHASE]: "Wait for the letters to be revealed.",
+  [REJECTION.NOT_PLAYING]: "You're watching this round — your turn comes around.",
   [REJECTION.ROUND_OVER]: "This round is already decided.",
 });
 

@@ -2,11 +2,19 @@
 
 A real-time two-player word duel that runs entirely in the browser. No backend, no accounts, no build step.
 
-Both players secretly pick **one letter**. After a three-second countdown the letters reveal simultaneously, and both race to type a real English word that **starts with the first letter and ends with the second**. Fastest valid word takes the round.
+Everyone secretly picks **one letter**. After a three-second countdown the letters reveal simultaneously and everyone races to type a real English word that fits them. Fastest valid word takes the round.
+
+**Three modes**, all sharing the same settings, timer and scoring:
 
 ```
-Player A: M          Player B: T
-valid: moment · market · merit
+Duel · 2 players            the word starts with one letter, ends with the other
+  M …………………… T             moment · market · merit
+
+Round robin · 2–4 players   same rule, but two duel each round while the rest
+  Bob vs Cara               watch; pairings rotate until everyone has met
+
+Letter hunt · 3–4 players   the word must contain every letter, anywhere
+  B  ·  A  ·  N             bandit · brain · abandon
 ```
 
 ---
@@ -14,6 +22,7 @@ valid: moment · market · merit
 ## Table of contents
 
 - [Playing it](#playing-it)
+- [Game modes and settings](#game-modes-and-settings)
 - [Running it locally](#running-it-locally)
 - [How the multiplayer works](#how-the-multiplayer-works)
 - [Why PeerJS, and what it costs](#why-peerjs-and-what-it-costs)
@@ -38,11 +47,51 @@ valid: moment · market · merit
 
 1. One player creates a room and gets a four-digit code.
 2. They share the code, or the invite link: `https://your-host/?room=4821`
-3. The other player opens it, and the code is already filled in.
-4. Both mark ready. The host starts the match.
-5. Each round: pick a secret letter → 3·2·1 → both letters flip up → race to type a word.
+3. Everyone else opens it, and the code is already filled in.
+4. The host picks the mode and rules. Everyone marks ready. The host starts.
+5. Each round: pick a secret letter → 3·2·1 → all letters flip up → race to type a word.
 
-Rounds alternate who supplies the starting letter, because ending a word on `Q` is much harder than starting one with it.
+In a duel, rounds alternate who supplies the starting letter, because ending a word on `Q` is much harder than starting one with it. In a letter hunt every letter is equal, so there is nothing to alternate.
+
+---
+
+## Game modes and settings
+
+The host configures the match in the lobby. Settings ride in the state snapshot, so every player sees the same rules before the first letter is picked — nobody discovers the timer changed once the race is already running. Guests see the same panel read-only.
+
+| Setting | Choices | Notes |
+| --- | --- | --- |
+| **Mode** | Duel (2) · Round robin (2–4) · Letter hunt (3–4) | Switching to a mode that seats fewer players than are present is refused rather than silently evicting someone |
+| **Time to find a word** | 15s · 30s · 45s · 60s · 90s | Discrete choices, because a slider inviting someone to pick 7 seconds helps nobody |
+| **Minimum word length** | 2–10 | The floor rises with the seat count in letter hunt (see below) |
+
+Settings lock once a match is running. Changing them mid-round would rewrite a rule players are already racing against, so the host is told to go back to the lobby first.
+
+**Two constraints that are enforced rather than trusted.**
+
+*The minimum length floor.* In letter hunt a word has to fit every player's letter, so with four players nothing under four letters can ever be valid. Letting the host set a lower minimum would advertise a rule the dictionary can never satisfy, so the floor tracks the seat count and the impossible choices are shown disabled rather than hidden.
+
+*Clamping.* Settings arrive over the network, so `normaliseSettings()` clamps every field on receipt. A guest handed `raceDurationMs: 0` by a buggy or hostile host would otherwise get a race that ends before it starts.
+
+**Duplicate letters use set semantics.** If two players both pick `E`, the word needs one `E`, not two. With four letters to satisfy the mode is hard enough already, and *"your word needs two E's because we both picked E"* is a rule nobody would guess from the instructions.
+
+### Round robin and observers
+
+Only two people play each round; everyone else watches. That means the round machine cannot assume "everyone picks a letter and races", so `match.activeIds` names who is playing and everyone absent from it is an observer. It is published in the snapshot rather than derived client-side, so the board never has to re-implement the pairing rule to know who is up.
+
+Observers see the board, the revealed letters and the running clock — spectating is dull otherwise — but get no letter tile and no word field, and the scoreboard tags everyone *Duelling* or *Watching*.
+
+**The rules are enforced on the host, not in the UI.** A spectator's `submitLetter` and `submitWord` are both refused with `NOT_PLAYING`, because the UI that hides those controls runs on a machine we do not control. Verified by having the host itself observe a round and try to submit: refused, and the submission never even reached the queue.
+
+**Pairings use the circle method, not a nested loop.** The obvious enumeration —
+
+```js
+for (i) for (j > i) pairs.push([i, j])      // unfair
+```
+
+— produces every pairing exactly once but in a badly lopsided order. With four players it deals `0-1, 0-2, 0-3, 1-2, 1-3, 2-3`, so player 0 duels three rounds back to back and then sits out three, and nobody wants to be player 3 watching the first half of every cycle. The circle method fixes one seat and rotates the rest, which cuts the longest consecutive run from 3 to 2 and keeps appearances even. An odd roster gets a phantom bye seat, so three players get a clean three-pairing cycle.
+
+The schedule is derived from the current roster each round rather than stored, so someone joining or leaving reshapes the rotation instead of leaving stale pairings pointing at a player who left.
 
 ---
 
@@ -64,6 +113,8 @@ To play against yourself while developing, open the invite link in a **second br
 
 ## How the multiplayer works
 
+The topology is a **star**: the host holds one connection per guest, and guests are never connected to each other. That falls out of the authority model for free — every message a guest cares about comes from the host anyway, so a full mesh would multiply connections for nothing.
+
 The whole architecture follows from one decision: **the host is the authority.**
 
 ```
@@ -80,7 +131,8 @@ A guest never mutates authoritative state. It sends *intents* and renders whatev
 
 Everything else is a consequence:
 
-- **One tally, one dictionary, one clock.** The host owns the scores, does every dictionary lookup, and runs every timer. Two clients asking a flaky API independently could get different answers and desync the match, so exactly one asks.
+- **One tally, one dictionary, one clock.** The host owns the scores, does every dictionary lookup, and runs every timer. Clients asking a flaky API independently could get different answers and desync the match, so exactly one asks.
+- **Per-peer bookkeeping.** Sequence numbers, duplicate suppression and clock offsets are tracked per connection. A shared dedupe counter would silently swallow one player's messages whenever their sequence numbers lagged another's, and a shared clock offset would apply one player's latency correction to everybody.
 - **Snapshots, not deltas.** Every transition broadcasts the full authoritative slice. It costs a few hundred bytes and removes an entire category of bug: there is no way to miss a delta and drift.
 - **Deadlines, not countdowns.** Timers are absolute end times carried in the snapshot, so both screens compute remaining time from their own clock. A throttled background tab shows the right number on its next tick instead of lagging, and a reconnecting player lands on the correct value immediately.
 
@@ -216,15 +268,21 @@ Two bugs found and fixed while building this, both worth knowing about if you to
 
 ---
 
-## Unwinnable letter pairs
+## Unwinnable hands
 
-**90 of the 676 possible letter pairs have no English word at all** — `qj`, `xz`, `vq`, `zx` and friends. Running a thirty-second timer on one of those is not a challenge; it is a dead round that players will read as the game being broken.
+**90 of the 676 possible letter pairs have no English word at all** — `qj`, `xz`, `vq`, `zx` and friends. In letter hunt it is worse: four random letters share no word surprisingly often (`jqvx` has nothing, and so do plenty of less obvious sets). Running a timer on one of those is not a challenge; it is a dead round players will read as the game being broken.
 
-So the local wordlist doubles as an oracle. On load it indexes every first+last letter pair that has at least one word, and at reveal the host asks whether the dealt pair is playable. If it is not, the round is re-dealt with an explanation:
+So the local wordlist doubles as an oracle, and the host checks the dealt hand at reveal:
+
+- **Duel** — on load the list indexes every first+last letter pair that has at least one word, so the check is a single `Set` lookup.
+- **Letter hunt** — precomputing is not an option, since four letters from an alphabet of 26 is far too many combinations to index. It scans instead: a linear pass over 37k words with an early bail on the first missing letter, which runs in a couple of milliseconds and costs nothing next to the dictionary round trip it prevents.
+
+If a hand is unplayable the round is re-dealt with an explanation:
 
 > No English word runs from Q to J — new letters.
+> No word contains J, Q, V, X — new letters.
 
-All 26 letters stay available, and no round is ever unwinnable.
+All 26 letters stay available in both modes, and no round is ever unwinnable.
 
 ---
 
@@ -252,7 +310,9 @@ game/
   GameManager.js             orchestrator and authority
   RoundManager.js            the round state machine (host only)
   SubmissionQueue.js         decides who won the race
-  Validator.js               synchronous word rules
+  Validator.js               synchronous word rules, all modes
+  GameSettings.js            settings defaults, clamping, mode capacity
+  Pairings.js                round-robin rotation (circle method)
   ScoreManager.js            pure score transformations
   Timer.js                   deadline-based timers
   LobbyManager.js            lobby rendering
@@ -265,7 +325,7 @@ net/
 
 ui/
   Screen.js  Board.js  Scoreboard.js  Countdown.js
-  PlayerCard.js  HeroDemo.js  Toast.js
+  SettingsPanel.js  PlayerCard.js  HeroDemo.js  Toast.js
 
 dict/
   DictionaryService.js       the provider chain
@@ -289,11 +349,11 @@ Conventions worth knowing before contributing:
 
 The direction is **sticker arcade**: chunky rounded type, 3px ink outlines, hard offset shadows, a dot-grid sheet, and nothing sitting perfectly square. Two typefaces, both rounded — **Baloo 2** for display and letter tiles, **Nunito** for everything else. There is deliberately no monospace: the room code sits in fixed-width digit boxes and the countdown in a fixed container, so the layout cannot reflow as digits change and tabular figures buy nothing.
 
-**The signature is the overprint.** Player A is fluorescent pink, Player B is bright blue, and two ink bands reach out from behind their tiles to overlap in the gap between them. `mix-blend-mode: multiply` turns that overlap into a third colour, and that overprint purple is exactly where the word gets typed — the spot where the two players' letters join to make one word.
+**The signature is the overprint.** Seats are inked pink, blue, mint and tangerine, and one ink band per player is laid in a row behind the tiles. Neighbouring bands overlap and `mix-blend-mode: multiply` turns each seam into a darker overprint — marking exactly where the players' letters join to make one word. One band per player rather than a fixed pair, so a duel gets a single seam in the middle and a four-player letter hunt gets three: the effect scales with the roster instead of being special-cased.
 
 Getting it working involved two instructive failures:
 
-- Adding `transform: rotate()` to the tiles for playfulness silently killed the effect. A transform creates a **stacking context**, so each tile isolated its own blend and two blended layers in separate stacking contexts can never blend with each other. The bands had to move out of the tiles and become siblings in the standoff. Anything animating the bands uses `inline-size`, not `scale`, for the same reason.
+- Adding `transform: rotate()` to the tiles for playfulness silently killed the effect. A transform creates a **stacking context**, so each tile isolated its own blend and two blended layers in separate stacking contexts can never blend with each other. The bands had to move out of the tiles entirely. The same trap governs the reveal animation: the growth transform goes on the `.bridge` row, never on an individual band, because a transformed band would stop blending with its neighbours. The row already carries `isolation: isolate`, so transforming it changes nothing about the blend.
 - Then a decorative "VS" star burst was added in the gap — and at 42% of tile width it was wider than the gap, covering the overprint completely. It got cut. A "VS" badge is generic party-game decoration; the overprint is specific to this game, and only one of them could have the spot.
 
 Motion is spent in three orchestrated places and nowhere else: the **countdown** (the number stamps down, the tiles lean toward each other, the paper grain intensifies), the **reveal** (both tiles flip together on a split-flap board), and the **win** (the board jolts out of register like a misprinted colour pass, then confetti in the winner's ink). One house easing, `--ease-boing`, overshoots and settles so things land rather than fade in.
@@ -336,7 +396,11 @@ Everything lives in `js/constants.js`.
 | Constant | Default | Meaning |
 | --- | --- | --- |
 | `COUNTDOWN_SECONDS` | `3` | Beats before the reveal |
-| `WORD_RACE_DURATION_MS` | `30_000` | Race length before a draw |
+| `DEFAULT_SETTINGS` | duel · 30s · 2 | What a new room starts with |
+| `RACE_DURATION_CHOICES_MS` | 15/30/45/60/90s | The options the host is offered |
+| `RACE_DURATION_BOUNDS_MS` | 10s–180s | Hard clamp on anything arriving over the wire |
+| `MIN_WORD_LENGTH_BOUNDS` | 2–10 | Hard clamp on the length setting |
+| `MODE_CAPACITY` | duel 2 · hunt 3–4 | Seats each mode allows |
 | `LETTER_ENTRY_DURATION_MS` | `45_000` | Soft cap; then a letter is picked for you |
 | `SUBMIT_COALESCE_WINDOW_MS` | `120` | Fairness window for near-simultaneous submits |
 | `DICTIONARY_TIMEOUT_MS` | `2_500` | Per-provider budget |
@@ -376,7 +440,11 @@ const snap = () => { const s = __wordRace.store.getState();
 __wordRace.game.diagnostics();
 ```
 
-What was verified end to end: room creation on the public broker, join by code and by URL, ready sync in both directions, byte-identical state across peers, letter secrecy (adversarial search of the guest's state and DOM), the countdown and simultaneous reveal, seat alternation, all 11 word-rule cases, live dictionary acceptance, the dead-pair oracle, host-leave detection, the submission race (10/10 against a 0/5 naive control), and profile prefill on return visits.
+What was verified end to end: room creation on the public broker, join by code and by URL, ready sync in both directions, byte-identical state across peers, letter secrecy (adversarial search of a guest's state and DOM), the countdown and simultaneous reveal, seat alternation, every word-rule case in both modes, live dictionary acceptance and fallback to the local list when the API timed out, the dead-hand oracle for pairs and for letter sets, host-leave detection, the submission race (10/10 against a 0/5 naive control), and profile prefill on return visits.
+
+**Three-player letter hunt** was verified with three live tabs: one host holding two peer connections, three tiles and three overprint seams rendered, letters `B·A·N` collected secretly, `bad` refused for a missing letter, `bandit` accepted, and all three snapshots byte-identical afterwards. Settings guards were checked too — locked mid-match, duel refused while three players are seated, and the length floor held at 3.
+
+**Three-player round robin** was verified across two rounds: round 1 paired Bob vs Cara with the *host* observing (0 letter inputs, word field hidden, scoreboard tagging), the observing host's word submission refused without reaching the queue, then round 2 rotated to Cara vs Ada with Bob benched. The rotation itself is checked separately for 2, 3 and 4 players — every pairing exactly once, equal appearances, and the longest consecutive run held at 2.
 
 **Note on background tabs:** Chrome throttles `setTimeout` to roughly 1 second in a backgrounded tab, so anything driving the game from a hidden tab needs generous wait budgets. This is also why `Timer.js` is deadline-based — correctness does not depend on interval accuracy.
 
@@ -386,7 +454,10 @@ What was verified end to end: room creation on the public broker, join by code a
 
 - **The host is the server.** Closing the host's tab ends the room. Rooms are not host-independent.
 - **No TURN server**, so a minority of restrictive networks cannot connect at all. Detected and explained, not silently retried.
-- **Two players only.** The authority model extends to more, but the board and lobby are built for a duel.
+- **Four players maximum.** The authority model extends further, but the board and scoreboard are built for four seats.
+- **Nobody can join a match already in progress** — the rule was built from the letters of whoever was seated at the deal. Late arrivals are refused until the room returns to the lobby. (Round robin has observers, but they are seated players waiting their turn, not drop-in spectators.)
+- **Round robin has no standings view.** Scores accumulate correctly, but there is no cross-table showing who beat whom.
+- **Dropping below the minimum ends the match**, not the room. If a letter hunt falls to two players everyone returns to the lobby rather than racing a rule built for three.
 - **Nothing persists but your name.** Scores live in memory for the length of the match.
 - **Latency compensation is best-effort.** It stops latency from deciding rounds; it cannot arbitrate a true photo finish.
 - **The local wordlist is a fallback, not a referee.** 36,869 frequency-ranked words. Obscure but valid words rely on the API being reachable.

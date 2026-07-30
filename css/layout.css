@@ -125,28 +125,36 @@
     width: 100%;
   }
 
-  .standoff__gap {
-    width: var(--bridge-gap);
-    flex: 0 0 auto;
-  }
-
-  /* Geometry for the two overlapping ink bands (see .bridge__ink):
-       --bridge-gap     open space between the tiles
-       --bridge-tuck    how far each band hides behind its own tile
-       --bridge-overlap half the width of the resulting overprint band */
+  /* Geometry for the ink bands (see .bridge / .bridge__seg):
+       --bridge-gap     open space between adjacent tiles
+       --bridge-overlap how far neighbouring bands overlap, which is the width
+                        of each overprint seam */
   .standoff--bridge {
     --bridge-gap: clamp(2.5rem, 6vw, 4rem);
-    --bridge-tuck: clamp(1rem, 3vw, 1.75rem);
     --bridge-overlap: clamp(0.85rem, 2.2vw, 1.4rem);
   }
 
-  /* Slots sit above the ink bands so the bands read as passing behind the
-     tiles. Positioning them is also what keeps the bands from painting over
-     the tiles: absolutely-positioned siblings would otherwise win paint order
-     against in-flow blocks. */
-  .standoff__slot {
+  /* The rail is only as wide as the tiles it holds, which is what lets the ink
+     bands span exactly the tile row regardless of how many players there are. */
+  .standoff__rail {
+    position: relative;
+    display: inline-block;
+  }
+
+  /* Tiles sit above the bands so the bands read as passing behind them.
+     Positioning them is also what keeps the bands from painting over the tiles:
+     an absolutely-positioned sibling would otherwise win paint order against an
+     in-flow block. */
+  .standoff__tiles {
     position: relative;
     z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--bridge-gap);
+  }
+
+  .standoff__slot {
     display: grid;
     place-items: center;
     flex: 0 0 auto;
