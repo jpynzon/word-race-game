@@ -24,6 +24,12 @@
     <link rel="stylesheet" href="./css/components.css" />
     <link rel="stylesheet" href="./css/animations.css" />
 
+    <!-- PeerJS is a networking library, not a UI framework: it wraps WebRTC
+         signalling so two browsers can open a direct data channel with no
+         server of our own. Loaded as a classic script (window.Peer) rather than
+         an ES module import so a CDN hiccup degrades to a clear error screen
+         instead of blocking the whole module graph. -->
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <script type="module" src="./js/app.js"></script>
   </head>
 
