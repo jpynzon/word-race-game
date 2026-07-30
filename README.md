@@ -1,0 +1,414 @@
+# Word Race
+
+A real-time two-player word duel that runs entirely in the browser. No backend, no accounts, no build step.
+
+Both players secretly pick **one letter**. After a three-second countdown the letters reveal simultaneously, and both race to type a real English word that **starts with the first letter and ends with the second**. Fastest valid word takes the round.
+
+```
+Player A: M          Player B: T
+valid: moment · market · merit
+```
+
+---
+
+## Table of contents
+
+- [Playing it](#playing-it)
+- [Running it locally](#running-it-locally)
+- [How the multiplayer works](#how-the-multiplayer-works)
+- [Why PeerJS, and what it costs](#why-peerjs-and-what-it-costs)
+- [The hard part: who won the race](#the-hard-part-who-won-the-race)
+- [Word validation](#word-validation)
+- [Keeping letters secret](#keeping-letters-secret)
+- [Reconnecting](#reconnecting)
+- [Unwinnable letter pairs](#unwinnable-letter-pairs)
+- [Project layout](#project-layout)
+- [Design](#design)
+- [Accessibility](#accessibility)
+- [Deploying](#deploying)
+- [Configuration](#configuration)
+- [Testing](#testing)
+- [Known limitations](#known-limitations)
+- [Future improvements](#future-improvements)
+- [Credits](#credits)
+
+---
+
+## Playing it
+
+1. One player creates a room and gets a four-digit code.
+2. They share the code, or the invite link: `https://your-host/?room=4821`
+3. The other player opens it, and the code is already filled in.
+4. Both mark ready. The host starts the match.
+5. Each round: pick a secret letter → 3·2·1 → both letters flip up → race to type a word.
+
+Rounds alternate who supplies the starting letter, because ending a word on `Q` is much harder than starting one with it.
+
+---
+
+## Running it locally
+
+There is no build step and no dependencies to install. Any static file server works:
+
+```bash
+npx serve --listen 4173 word-race
+```
+
+Then open `http://localhost:4173`.
+
+To play against yourself while developing, open the invite link in a **second browser profile or a private window**, not just a second tab — two tabs of the same browser share one `localStorage` profile. The host detects that collision and renames the second player, so it does work, but separate profiles are a cleaner simulation of two real devices.
+
+`file://` will not work: the app uses ES modules, which browsers refuse to load over the file protocol.
+
+---
+
+## How the multiplayer works
+
+The whole architecture follows from one decision: **the host is the authority.**
+
+```
+GUEST                                HOST
+  │                                    │
+  │  intent  ────────────────────────▶  │  validate → mutate state → broadcast
+  │          (letter, word, ready)      │
+  │                                     │
+  │  ◀──────────────────────  full state snapshot
+  │            render
+```
+
+A guest never mutates authoritative state. It sends *intents* and renders whatever snapshot comes back. This is why "both players always see the same game state" is true **by construction** rather than by careful bookkeeping — a guest holds no copy of the rules that could drift out of agreement.
+
+Everything else is a consequence:
+
+- **One tally, one dictionary, one clock.** The host owns the scores, does every dictionary lookup, and runs every timer. Two clients asking a flaky API independently could get different answers and desync the match, so exactly one asks.
+- **Snapshots, not deltas.** Every transition broadcasts the full authoritative slice. It costs a few hundred bytes and removes an entire category of bug: there is no way to miss a delta and drift.
+- **Deadlines, not countdowns.** Timers are absolute end times carried in the snapshot, so both screens compute remaining time from their own clock. A throttled background tab shows the right number on its next tick instead of lagging, and a reconnecting player lands on the correct value immediately.
+
+The room code *is* the network address. The host claims the peer id `wordrace-v1-4821`, so a guest holding the code already knows where to connect. That is what removes the need for a server — there is no room registry to look anything up in. A code collision needs no coordination either: if the broker says the id is taken, the host generates a new code and retries.
+
+---
+
+## Why PeerJS, and what it costs
+
+The brief was "frontend only", but real-time multiplayer needs networking. Rather than pretend otherwise, here is the actual trade space:
+
+| Option | Backend | Setup | Latency | Survives host leaving |
+| --- | --- | --- | --- | --- |
+| **PeerJS / WebRTC** ✅ | none | none | best (peer-to-peer) | **no** |
+| Firebase Realtime DB | managed | project + config keys | datacenter round-trip | yes |
+| Supabase Realtime | managed | account + anon keys | datacenter round-trip | yes |
+| Ably / Pusher | managed | paid tier + API keys | datacenter round-trip | yes |
+
+PeerJS wins on the brief's own terms — zero backend, zero signup, zero keys, and the lowest possible latency because the data goes device-to-device instead of through a datacenter. For a game decided in milliseconds, that last point matters.
+
+**It costs two real things, both handled explicitly rather than hidden:**
+
+1. **The host is the server.** Close the host's tab and the room ends. The guest gets an honest "The host left the game" screen explaining why, with a way out — not a frozen board.
+2. **No TURN server.** The free broker handles signalling only. On most networks the peers connect directly; on restrictive ones (symmetric NAT, strict corporate or school firewalls) they cannot. That case is detected by timeout and reported as *"This network won't allow a direct connection"* with a suggestion to try a hotspot — deliberately distinguished from "no such room", because they need different fixes.
+
+Both limitations are contained by keeping PeerJS in exactly one file behind a four-method interface:
+
+```js
+hostRoom(code) → Promise<{roomCode}>
+joinRoom(code) → Promise<void>
+send(object)
+close()
+```
+
+`net/PeerTransport.js` is the only file in the project that knows PeerJS exists. Swapping to Firebase means writing one more file with those four methods and changing a single line in `GameManager`. Nothing above that layer mentions peers, ICE, or data channels.
+
+---
+
+## The hard part: who won the race
+
+This is the most delicate code in the project, and the reason `game/SubmissionQueue.js` exists.
+
+Validating a word requires an **async dictionary call**. The obvious implementation is wrong:
+
+```js
+onWord(sub) { if (await validate(sub)) declareWinner(sub) }   // WRONG
+```
+
+Two submissions milliseconds apart start two concurrent lookups, and those lookups can resolve **in either order** — a cached word returns instantly while an uncached one waits on the network. So the player who submitted *second* routinely wins. Worse, it is nondeterministic, so it reads as random unfairness rather than a bug.
+
+Measured, with the first presser given the slow lookup:
+
+| Implementation | First presser wins |
+| --- | --- |
+| Naive concurrent validation | **0 / 5** |
+| `SubmissionQueue` | **10 / 10** |
+
+The fix has two parts:
+
+**1. Serialize.** Exactly one validation is ever in flight. The queue drains one item at a time, fully awaiting each before touching the next, and the first valid word ends the round. Concurrency cannot reorder what never runs concurrently.
+
+**2. Order fairly before draining.** Raw arrival order punishes latency: a guest 80 ms away always loses a photo finish they actually won. So the first submission opens a short coalescing window (120 ms), and everything inside it is sorted by **offset-corrected client time** — when each player actually pressed the key — with arrival ordinal as a deterministic tiebreaker.
+
+Clock offset is estimated by ping/pong, keeping only the **lowest-RTT sample**. On a jittery link the fastest round trip is by far the most trustworthy: a fast round trip cannot have been delayed much in either direction, while a slow one gives no clue which leg was slow. This is best-effort by nature and documented as such — good enough that latency does not decide rounds, not good enough to arbitrate a true photo finish, which is why arrival order remains the tiebreaker.
+
+Other race conditions, each with a named cause:
+
+- **Duplicate submissions** — every intent carries `{roundId, seq}`; the host ignores stale rounds and already-seen sequence numbers. Covers double-taps, key repeat, and re-delivery after a reconnect.
+- **Late winners** — a round can end while a validation is still awaiting. The queue re-checks `roundId` after every `await` and refuses to crown a winner for a round that is already over.
+- **Malformed messages** — one validator in `net/Events.js` gates every inbound message on shape, type, and *direction* before dispatch. A guest cannot send a `SNAPSHOT` and rewrite the host's state. Drops are counted, never thrown.
+
+---
+
+## Word validation
+
+Two genuinely separate questions, deliberately not merged.
+
+**Does it follow the rules?** (`game/Validator.js`) — synchronous, pure, and checked first so a word with the wrong first letter never costs a network round trip. Length ≥ 2, letters only, correct start and end, not already used this match. Returns a typed reason code; `js/messages.js` owns the English.
+
+**Does the word exist?** (`dict/DictionaryService.js`) — a provider chain, each implementing:
+
+```js
+async lookup(word) → { exists: boolean, source: string, confident: boolean }
+```
+
+| Order | Provider | Notes |
+| --- | --- | --- |
+| 1 | Merriam-Webster | Best quality. Inert unless an API key is configured. |
+| 2 | Free Dictionary (`dictionaryapi.dev`) | The primary in practice — no key, and `Access-Control-Allow-Origin: *`, so a static page can call it with no proxy. |
+| 3 | Local wordlist | Always answers. The only offline path. |
+
+The chain stops at the first **confident** answer. That distinction is the important part:
+
+- `200` → the word exists *(confident)*
+- `404` → the word does not exist *(confident)*
+- timeout, `5xx`, network error → we learned nothing *(not confident, fall through)*
+
+Without it, a flaky network reads as "not a word" and steals rounds from players.
+
+**Urban Dictionary is deliberately excluded.** It would accept slang and typos as English, which in a word race means accepting nonsense. It remains possible as an opt-in extra provider, never in the default chain.
+
+Results are memoised per match, so a word retried mid-race costs no second round trip and cannot change its answer between attempts.
+
+---
+
+## Keeping letters secret
+
+The whole game collapses if you can see your opponent's letter early, so it is not merely hidden with CSS.
+
+Committed letters live in a **private map inside `RoundManager`**, outside the store. Only `committed: {playerId: true}` booleans are published. Because the snapshot is built from the store, the letters are physically not in the payload the guest receives — there is nothing in the page to find.
+
+Verified adversarially: with the host committed, the guest's entire serialized state contains `letters: null`, the only letter-related key is that boolean map, and the opponent's tile renders a placeholder.
+
+---
+
+## Reconnecting
+
+Identity is split across two storage lifetimes, and conflating them is what makes reconnection either work or not:
+
+- **`localStorage`** — survives closing the browser. Holds the display name and player id, so someone whose browser closed by accident can reopen the invite link and reclaim their seat and score without retyping anything.
+- **`sessionStorage`** — dies with the tab. Holds *this tab's* id.
+
+Both are needed. `localStorage` is shared by every tab on the origin, so if identity came from it alone, two tabs of one browser would claim the same player id — and since the host keys seats and scores by id, two players would collapse into one seat. The per-tab copy keeps them distinct; the durable copy provides the fallback for the first tab to ask. If a collision still happens, **the host is the authority on identity** and renames the guest, returning the assigned id in `WELCOME` for the guest to adopt.
+
+On a return visit the code and name are both pre-filled and focus lands on the submit button, so rejoining is one tap with zero typing.
+
+The host keeps a disconnected player's seat, readiness and score rather than clearing them — the seat belongs to the player.
+
+Two bugs found and fixed while building this, both worth knowing about if you touch the transport:
+
+1. **The heartbeat freed the wrong thing.** When a peer goes silent the heartbeat concludes it is gone — but it originally only *notified* the game layer without clearing the transport's connection reference. The transport kept holding a corpse and refused every genuine reconnect as "room full". It now drops the connection too.
+2. **An unidentified connection held the seat.** A data channel can open on the host's side while the joining player's side never finishes negotiating. That half-open connection still answers heartbeats, so it looks perfectly healthy, and it occupied the only guest seat forever. A connection now has `HELLO_TIMEOUT_MS` to introduce itself or it is dropped.
+
+---
+
+## Unwinnable letter pairs
+
+**90 of the 676 possible letter pairs have no English word at all** — `qj`, `xz`, `vq`, `zx` and friends. Running a thirty-second timer on one of those is not a challenge; it is a dead round that players will read as the game being broken.
+
+So the local wordlist doubles as an oracle. On load it indexes every first+last letter pair that has at least one word, and at reveal the host asks whether the dealt pair is playable. If it is not, the round is re-dealt with an explanation:
+
+> No English word runs from Q to J — new letters.
+
+All 26 letters stay available, and no round is ever unwinnable.
+
+---
+
+## Project layout
+
+```
+index.html                   all screens; toggled with [hidden]
+
+css/
+  reset.css                  reset + @layer order declaration
+  variables.css              design tokens
+  layout.css                 shell, screens, board geometry
+  components.css             buttons, tiles, cards, inputs
+  animations.css             keyframes + reduced-motion
+
+js/
+  app.js                     composition root — the only place that wires things
+  constants.js               every tunable value in the game
+  state.js                   the single store + selectors
+  router.js                  invite links in, shareable URL out
+  profile.js                 durable identity and remembered name
+  messages.js                every player-facing sentence
+
+game/
+  GameManager.js             orchestrator and authority
+  RoundManager.js            the round state machine (host only)
+  SubmissionQueue.js         decides who won the race
+  Validator.js               synchronous word rules
+  ScoreManager.js            pure score transformations
+  Timer.js                   deadline-based timers
+  LobbyManager.js            lobby rendering
+
+net/
+  Protocol.js                wire format and message types
+  Events.js                  inbound validation + dedupe
+  NetworkClient.js           sequencing, heartbeat, clock offset
+  PeerTransport.js           the only file that knows PeerJS exists
+
+ui/
+  Screen.js  Board.js  Scoreboard.js  Countdown.js
+  PlayerCard.js  HeroDemo.js  Toast.js
+
+dict/
+  DictionaryService.js       the provider chain
+  providers/                 Merriam-Webster · Free Dictionary · local list
+
+assets/
+  wordlist.txt               36,869 words
+  favicon.svg
+```
+
+Conventions worth knowing before contributing:
+
+- **No global mutable state.** `app.js` creates one store and passes it down. Every module receives its dependencies as arguments, which also makes each one testable with a throwaway store.
+- **No magic numbers.** If a number has meaning it has a name in `constants.js`.
+- **Codes, not sentences.** Game logic emits typed reason codes; only `messages.js` writes English.
+- **CSS uses `@layer`** (`reset, tokens, layout, components, animations`), so load order decides the cascade instead of selector specificity. A token override belongs in the tokens layer or it will lose.
+
+---
+
+## Design
+
+The direction is **sticker arcade**: chunky rounded type, 3px ink outlines, hard offset shadows, a dot-grid sheet, and nothing sitting perfectly square. Two typefaces, both rounded — **Baloo 2** for display and letter tiles, **Nunito** for everything else. There is deliberately no monospace: the room code sits in fixed-width digit boxes and the countdown in a fixed container, so the layout cannot reflow as digits change and tabular figures buy nothing.
+
+**The signature is the overprint.** Player A is fluorescent pink, Player B is bright blue, and two ink bands reach out from behind their tiles to overlap in the gap between them. `mix-blend-mode: multiply` turns that overlap into a third colour, and that overprint purple is exactly where the word gets typed — the spot where the two players' letters join to make one word.
+
+Getting it working involved two instructive failures:
+
+- Adding `transform: rotate()` to the tiles for playfulness silently killed the effect. A transform creates a **stacking context**, so each tile isolated its own blend and two blended layers in separate stacking contexts can never blend with each other. The bands had to move out of the tiles and become siblings in the standoff. Anything animating the bands uses `inline-size`, not `scale`, for the same reason.
+- Then a decorative "VS" star burst was added in the gap — and at 42% of tile width it was wider than the gap, covering the overprint completely. It got cut. A "VS" badge is generic party-game decoration; the overprint is specific to this game, and only one of them could have the spot.
+
+Motion is spent in three orchestrated places and nowhere else: the **countdown** (the number stamps down, the tiles lean toward each other, the paper grain intensifies), the **reveal** (both tiles flip together on a split-flap board), and the **win** (the board jolts out of register like a misprinted colour pass, then confetti in the winner's ink). One house easing, `--ease-boing`, overshoots and settles so things land rather than fade in.
+
+Grain and the dot grid are generated from an inline SVG filter and a repeating gradient — no image requests, and they scale to any viewport.
+
+---
+
+## Accessibility
+
+- Mobile-first and fluid to desktop, with a dedicated landscape treatment that scales tiles off the short axis. No horizontal scrolling at any width.
+- Touch targets ≥ 44px throughout.
+- Visible keyboard focus, and focus moves to the new screen on every transition rather than being stranded on a control that no longer exists.
+- `prefers-reduced-motion` collapses transitions to instant state changes. The countdown still counts, because the number is the information, not the animation.
+- A single assertive live region announces the round-critical moments — reveal, winner, draw — so the game is playable without sight. Toasts use a separate polite region so the two do not compete.
+
+---
+
+## Deploying
+
+It is static files. Anything that serves them works — GitHub Pages, Netlify, Vercel, Cloudflare Pages, S3.
+
+```bash
+# GitHub Pages: push, then enable Pages on the branch/folder.
+```
+
+Two requirements:
+
+- **HTTPS.** WebRTC needs a secure context. `localhost` is exempt; a deployed HTTP origin is not.
+- **Serve `assets/wordlist.txt` with gzip** if you can. It is 302 KB raw and about 100 KB compressed. Most hosts do this automatically.
+
+No environment variables, no server-side anything.
+
+---
+
+## Configuration
+
+Everything lives in `js/constants.js`.
+
+| Constant | Default | Meaning |
+| --- | --- | --- |
+| `COUNTDOWN_SECONDS` | `3` | Beats before the reveal |
+| `WORD_RACE_DURATION_MS` | `30_000` | Race length before a draw |
+| `LETTER_ENTRY_DURATION_MS` | `45_000` | Soft cap; then a letter is picked for you |
+| `SUBMIT_COALESCE_WINDOW_MS` | `120` | Fairness window for near-simultaneous submits |
+| `DICTIONARY_TIMEOUT_MS` | `2_500` | Per-provider budget |
+| `CONNECT_TIMEOUT_MS` | `12_000` | After this, report the network as blocking P2P |
+| `HELLO_TIMEOUT_MS` | `10_000` | Time to identify before the seat is released |
+| `MERRIAM_WEBSTER_API_KEY` | `""` | Set it to promote Merriam-Webster to primary |
+
+**Adding a TURN server** for restrictive networks — in `net/PeerTransport.js`, pass an ICE config to the `Peer` constructor:
+
+```js
+new PeerCtor(id, {
+  config: {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "turn:your-turn-host:3478", username: "user", credential: "pass" },
+    ],
+  },
+});
+```
+
+**Swapping the transport** — write `net/FirebaseTransport.js` implementing `hostRoom`, `joinRoom`, `send`, `close` (plus the optional `dropConnection` and `isConnected`), then change the `createTransport` default in `net/NetworkClient.js`. No game logic changes.
+
+---
+
+## Testing
+
+There is no test runner. Verification was done by driving two real browser tabs and asserting against live state, which for a networked game catches things a unit test cannot.
+
+`window.__wordRace` exposes `{ store, game, board, profile, router, navigate }` for exactly this. Useful checks:
+
+```js
+// State parity — must be byte-identical on both peers.
+const snap = () => { const s = __wordRace.store.getState();
+  return JSON.stringify({ players: s.players, order: s.playerOrder, match: s.match }); };
+
+// Network counters: dropped messages, clock offset, ping samples.
+__wordRace.game.diagnostics();
+```
+
+What was verified end to end: room creation on the public broker, join by code and by URL, ready sync in both directions, byte-identical state across peers, letter secrecy (adversarial search of the guest's state and DOM), the countdown and simultaneous reveal, seat alternation, all 11 word-rule cases, live dictionary acceptance, the dead-pair oracle, host-leave detection, the submission race (10/10 against a 0/5 naive control), and profile prefill on return visits.
+
+**Note on background tabs:** Chrome throttles `setTimeout` to roughly 1 second in a backgrounded tab, so anything driving the game from a hidden tab needs generous wait budgets. This is also why `Timer.js` is deadline-based — correctness does not depend on interval accuracy.
+
+---
+
+## Known limitations
+
+- **The host is the server.** Closing the host's tab ends the room. Rooms are not host-independent.
+- **No TURN server**, so a minority of restrictive networks cannot connect at all. Detected and explained, not silently retried.
+- **Two players only.** The authority model extends to more, but the board and lobby are built for a duel.
+- **Nothing persists but your name.** Scores live in memory for the length of the match.
+- **Latency compensation is best-effort.** It stops latency from deciding rounds; it cannot arbitrate a true photo finish.
+- **The local wordlist is a fallback, not a referee.** 36,869 frequency-ranked words. Obscure but valid words rely on the API being reachable.
+- **Guest-side reconnect is partly unverified.** The identity and prefill half is confirmed working; full transport-level seat reclamation was hard to exercise reliably in a backgrounded-tab test environment, and the two fixes described above were made in response to real failures observed there.
+
+---
+
+## Future improvements
+
+- A `FirebaseTransport` for host-independent rooms that survive the host leaving.
+- Spectators and more than two players.
+- Word definitions on the result screen — the API already returns them.
+- Rematch with the same opponent, and match history.
+- An optional typing indicator. The protocol has a slot reserved and it is deliberately unimplemented: during a race, seeing your opponent type six characters tells you they have found something.
+- A "not me" control to clear the saved profile.
+- Sound. A split-flap clack on reveal and a bell on a win would carry a lot of the feel.
+
+---
+
+## Credits
+
+- **Networking** — [PeerJS](https://peerjs.com/) over its free public signalling broker.
+- **Dictionary** — [Free Dictionary API](https://dictionaryapi.dev/), with optional [Merriam-Webster](https://dictionaryapi.com/).
+- **Wordlist** — the 50k most frequent English words from [hermitdave/FrequencyWords](https://github.com/hermitdave/FrequencyWords) intersected with [dwyl/english-words](https://github.com/dwyl/english-words), giving 36,869 words that people actually use and that genuinely exist. Brand names and acronyms fall out naturally.
+- **Type** — [Baloo 2](https://fonts.google.com/specimen/Baloo+2) and [Nunito](https://fonts.google.com/specimen/Nunito) via Google Fonts.

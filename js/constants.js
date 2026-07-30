@@ -46,6 +46,16 @@ export const CONNECT_TIMEOUT_MS = 12_000;
 /** How long the host holds a disconnected player's seat open before releasing it. */
 export const RECONNECT_GRACE_MS = 20_000;
 
+/**
+ * How long a newly opened connection has to identify itself with HELLO.
+ *
+ * A data channel can open on the host's side while the joining player's side
+ * never finishes negotiating, leaving a connection that will never introduce
+ * itself. Without a deadline that silent connection holds the only guest seat
+ * forever and every genuine reconnect is refused as "room full".
+ */
+export const HELLO_TIMEOUT_MS = 10_000;
+
 /** Backoff schedule for guest reconnect attempts, in milliseconds. */
 export const RECONNECT_BACKOFF_MS = [400, 900, 1_800, 3_500, 6_000];
 

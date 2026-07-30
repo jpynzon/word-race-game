@@ -1,6 +1,7 @@
 import {
   CONNECTION,
   FAILURE,
+  HELLO_TIMEOUT_MS,
   MAX_PLAYERS,
   PHASE,
   ROLE,
@@ -34,31 +35,13 @@ import { createValidator } from "./Validator.js";
  * desync the match, so there is exactly one asker.
  */
 
-const PLAYER_ID_KEY = "wordrace.playerId";
-
-/**
- * A stable identity for this tab that survives reload, so a reconnecting player
- * reclaims their seat and score instead of arriving as a stranger.
- *
- * @returns {string}
- */
-function resolveLocalPlayerId() {
-  const existing = sessionStorage.getItem(PLAYER_ID_KEY);
-  if (existing) return existing;
-  const id =
-    typeof crypto?.randomUUID === "function"
-      ? `p-${crypto.randomUUID().slice(0, 8)}`
-      : `p-${Math.random().toString(36).slice(2, 10)}`;
-  sessionStorage.setItem(PLAYER_ID_KEY, id);
-  return id;
-}
-
 /**
  * @param {{
  *   store: object,
  *   toaster: object,
  *   navigate: (screen: string) => void,
  *   onWordRejected: (reason: string) => void,
+ *   profile: object,
  *   createNetwork?: typeof createNetworkClient
  * }} deps
  */
@@ -67,8 +50,11 @@ export function createGameManager({
   toaster,
   navigate,
   onWordRejected,
+  profile,
   createNetwork = createNetworkClient,
 }) {
+  /** Identity comes from the durable profile. @see js/profile.js */
+  const resolveLocalPlayerId = () => profile.playerId();
   /** @type {ReturnType<typeof createNetworkClient>|null} */
   let net = null;
   /** @type {ReturnType<typeof createRoundManager>|null} */
@@ -164,7 +150,9 @@ export function createGameManager({
   /* ---- Host ------------------------------------------------------------ */
 
   /** @param {string} name */
-  async function createRoom(name) {
+  async function createRoom(rawName) {
+    // Committing to a room is the moment the name is worth keeping.
+    const name = profile.rememberName(rawName);
     const localPlayerId = resolveLocalPlayerId();
     store.set({ connection: CONNECTION.CONNECTING, failure: null });
 
@@ -203,22 +191,49 @@ export function createGameManager({
   }
 
   function registerHostHandlers() {
+    /* A connection that opens but never says HELLO must not hold the guest seat.
+       This happens for real: the data channel can open on our side while the
+       joining player's side never finishes negotiating, and the half-open
+       connection still answers heartbeats, so it looks perfectly healthy. Left
+       alone it occupies the only seat and every genuine reconnect is refused as
+       "room full". */
+    let helloDeadline = null;
+
+    function armHelloDeadline() {
+      clearTimeout(helloDeadline);
+      helloDeadline = setTimeout(() => {
+        const id = guestId();
+        const identified = id && store.getState().players[id]?.connected;
+        if (!identified) net?.dropPeer();
+      }, HELLO_TIMEOUT_MS);
+    }
+
     net.on(MSG.HELLO, (payload) => {
+      clearTimeout(helloDeadline);
       const state = store.getState();
 
+      /* Two tabs of one browser share a localStorage profile, so a guest can
+         arrive carrying the host's own id. Left alone the host would read that
+         as itself reconnecting and both players would collapse into one seat.
+         The host is the authority on identity, so it renames the guest and
+         returns the assigned id in WELCOME. */
+      let assignedId = payload.playerId;
+      if (assignedId === state.localPlayerId) assignedId = `${assignedId}-2`;
+
       // A returning player reclaims their seat rather than taking a new one.
-      const isReturning = Boolean(state.players[payload.playerId]);
+      const isReturning = Boolean(state.players[assignedId]);
       if (!isReturning && state.playerOrder.length >= MAX_PLAYERS) {
         net.send(MSG.REJECT, { code: FAILURE.ROOM_FULL });
         return;
       }
 
       const player = {
-        id: payload.playerId,
+        id: assignedId,
         name: payload.name,
         role: ROLE.GUEST,
         connected: true,
-        ready: isReturning ? (state.players[payload.playerId].ready ?? false) : false,
+        // Readiness and score survive a reconnect; the seat belongs to the player.
+        ready: isReturning ? (state.players[assignedId].ready ?? false) : false,
       };
 
       store.set({
@@ -277,7 +292,11 @@ export function createGameManager({
     });
 
     net.onLifecycle({
+      open() {
+        armHelloDeadline();
+      },
       close() {
+        clearTimeout(helloDeadline);
         // The seat is kept, not cleared: score and readiness belong to the
         // player, and a reconnect reclaims both.
         const state = store.getState();
@@ -304,7 +323,13 @@ export function createGameManager({
    * @param {string} roomCode
    * @param {string} name
    */
-  async function joinRoom(roomCode, name) {
+  async function joinRoom(roomCode, rawName) {
+    // A retry must not leave the previous attempt's peer alive: an orphaned
+    // client keeps answering heartbeats and holds the seat it half-claimed.
+    net?.close();
+    net = null;
+
+    const name = profile.rememberName(rawName);
     const localPlayerId = resolveLocalPlayerId();
     store.set({
       connection: CONNECTION.CONNECTING,
@@ -331,6 +356,9 @@ export function createGameManager({
 
   function registerGuestHandlers() {
     net.on(MSG.WELCOME, (payload) => {
+      // The host may have assigned a different id than we asked for. Remember
+      // the one it gave us, so a later rejoin reclaims this same seat.
+      profile.adoptAssignedId(payload.playerId);
       store.set({ connection: CONNECTION.CONNECTED, localPlayerId: payload.playerId });
       applySnapshot(payload.state);
       navigate(SCREEN.LOBBY);

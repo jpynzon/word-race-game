@@ -1,5 +1,6 @@
-import { MAX_NAME_LENGTH, PHASE, SCREEN } from "./constants.js";
+import { PHASE, SCREEN } from "./constants.js";
 import { describeRejection } from "./messages.js";
+import { createProfileStore, sanitiseName } from "./profile.js";
 import { createRouter, isValidRoomCode } from "./router.js";
 import { createStore } from "./state.js";
 import { createGameManager } from "../game/GameManager.js";
@@ -51,6 +52,7 @@ function boot() {
   };
 
   const store = createStore();
+  const profile = createProfileStore();
   const router = createRouter();
   const screens = createScreens(dom.screens);
   const toaster = createToaster(dom.toastRail);
@@ -87,6 +89,7 @@ function boot() {
     store,
     toaster,
     navigate,
+    profile,
     onWordRejected: (reason) => board?.rejectWord(describeRejection(reason)),
   });
 
@@ -177,7 +180,7 @@ function boot() {
 
   /** Reads and validates a display name field. @returns {string|null} */
   function readName(input, errorNode) {
-    const name = input.value.trim().replace(/\s+/g, " ").slice(0, MAX_NAME_LENGTH);
+    const name = sanitiseName(input.value);
     if (name.length === 0) {
       errorNode.textContent = "Add a name so your opponent knows who they're racing.";
       input.focus();
@@ -185,6 +188,25 @@ function boot() {
     }
     errorNode.textContent = "";
     return name;
+  }
+
+  /**
+   * Fills the name fields from the saved profile so a returning player never
+   * retypes their name, and relabels the submit buttons to say what will
+   * actually happen. The field stays editable — remembering a name is a
+   * convenience, not a commitment.
+   */
+  function applySavedProfile() {
+    const saved = profile.name();
+    if (!saved) return;
+
+    dom.createName.value = saved;
+    dom.joinName.value = saved;
+
+    const createSubmit = createForm.querySelector('[type="submit"]');
+    createSubmit.textContent = `Create a room as ${saved}`;
+    const joinSubmit = joinForm.querySelector('[type="submit"]');
+    joinSubmit.textContent = `Join as ${saved}`;
   }
 
   /**
@@ -291,19 +313,37 @@ function boot() {
   router.start();
 
   /* ---- Entry ---------------------------------------------------------
-     An invite link skips straight to the join form with the code filled in, so
-     the only thing left to do is say who you are. */
+     An invite link skips straight to the join form with the code filled in. If
+     the name is already known — a returning player, or someone whose browser
+     closed on them — there is nothing left to type: the code and the name are
+     both filled and focus lands on the button, so rejoining is one tap. */
+  applySavedProfile();
+
   const invitedCode = router.readInvite();
   if (invitedCode) {
     dom.joinCode.value = invitedCode;
     navigate(SCREEN.JOIN, { focus: false });
-    dom.joinName.focus();
+    if (profile.hasName()) {
+      joinForm.querySelector('[type="submit"]').focus({ preventScroll: true });
+    } else {
+      dom.joinName.focus();
+    }
   } else {
     navigate(SCREEN.HOME);
   }
 
   // Handles for the browser-driven end-to-end checks in each phase's verification.
-  window.__wordRace = { store, router, screens, toaster, announcer, game, board, navigate };
+  window.__wordRace = {
+    store,
+    router,
+    screens,
+    toaster,
+    announcer,
+    game,
+    board,
+    profile,
+    navigate,
+  };
 }
 
 if (document.readyState === "loading") {

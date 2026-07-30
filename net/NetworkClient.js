@@ -102,7 +102,14 @@ export function createNetworkClient({ role, createTransport = createPeerTranspor
       if (!transport.isConnected()) return;
       // A silent peer is a lost peer: the channel can stay nominally open long
       // after the tab it belongs to has gone away.
+      //
+      // Dropping the transport's connection here is essential, not tidy-up. The
+      // close event we never received would have freed the slot; concluding the
+      // peer is gone without freeing it leaves the transport holding a corpse,
+      // and it then refuses the returning player's reconnect as "room full".
       if (Date.now() - lastInboundAt > HEARTBEAT_TIMEOUT_MS) {
+        stopHeartbeat();
+        transport.dropConnection?.();
         emitLifecycle("close");
         return;
       }
@@ -229,6 +236,15 @@ export function createNetworkClient({ role, createTransport = createPeerTranspor
     /** @returns {boolean} */
     isConnected() {
       return transport.isConnected();
+    },
+
+    /**
+     * Drops the peer link while keeping the room open, so the seat is free for
+     * whoever connects next.
+     */
+    dropPeer() {
+      stopHeartbeat();
+      transport.dropConnection?.();
     },
 
     /** @returns {object} counters for the diagnostics in each phase's verification */

@@ -85,6 +85,21 @@ export function createPeerTransport({
     return window.Peer;
   }
 
+  /**
+   * Whether the attached connection is genuinely usable.
+   *
+   * Holding a reference is not the same as having a peer. A DataConnection can
+   * be closed underneath us — the tab went away, the network dropped — without
+   * its `close` event ever reaching us. Asking PeerJS directly is the only
+   * reliable answer, and getting this wrong makes reconnects impossible: the
+   * transport rejects the returning player because it thinks the seat is taken.
+   *
+   * @returns {boolean}
+   */
+  function connectionIsLive() {
+    return Boolean(connection) && connection.open !== false;
+  }
+
   /** Wires a DataConnection once it is the active one. */
   function adopt(conn) {
     connection = conn;
@@ -104,6 +119,20 @@ export function createPeerTransport({
     });
 
     if (!closed) onPeerOpen();
+  }
+
+  /**
+   * Releases the current connection without tearing down the peer, so the room
+   * stays open and the seat becomes available again.
+   */
+  function dropConnection() {
+    const doomed = connection;
+    connection = null;
+    try {
+      doomed?.close();
+    } catch {
+      /* it is already gone; we only needed to stop referencing it */
+    }
   }
 
   /** Builds a Peer and resolves once the broker has assigned it an id. */
@@ -181,9 +210,13 @@ export function createPeerTransport({
 
         watchBrokerLink(peer);
         peer.on("connection", (conn) => {
-          // One opponent only. A third arrival is told why and dropped, rather
-          // than silently ignored while its player stares at a spinner.
-          if (connection || closed) {
+          // A dead connection is not an occupant. Clear it out so a player whose
+          // browser closed can take their seat back.
+          if (connection && !connectionIsLive()) dropConnection();
+
+          // One opponent only. A genuine third arrival is told why and dropped,
+          // rather than silently ignored while its player stares at a spinner.
+          if (connectionIsLive() || closed) {
             conn.on("open", () => {
               if (buildRejectMessage) {
                 try {
@@ -273,8 +306,15 @@ export function createPeerTransport({
 
     /** @returns {boolean} */
     isConnected() {
-      return Boolean(connection) && !closed;
+      return connectionIsLive() && !closed;
     },
+
+    /**
+     * Drops the peer link but keeps the room open. Called when the heartbeat
+     * concludes the peer is gone: without this the transport would keep holding
+     * a dead connection and turn the seat into a permanent no-vacancy sign.
+     */
+    dropConnection,
 
     /** Tears everything down. Safe to call repeatedly. */
     close() {
