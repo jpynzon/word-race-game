@@ -1,0 +1,19 @@
+{
+  "name": "Word Race",
+  "short_name": "Word Race",
+  "description": "A real-time two-player word duel that runs entirely in the browser.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FBF3F6",
+  "theme_color": "#FBF3F6",
+  "icons": [
+    {
+      "src": "./assets/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
