@@ -2,6 +2,7 @@ import {
   CONNECTION,
   FAILURE,
   MAX_PLAYERS,
+  PHASE,
   ROLE,
   SCREEN,
 } from "../js/constants.js";
@@ -9,11 +10,12 @@ import { describeFailure } from "../js/messages.js";
 import { createInitialMatch, createInitialState } from "../js/state.js";
 import { createNetworkClient } from "../net/NetworkClient.js";
 import { MSG } from "../net/Protocol.js";
+import { createDictionaryService } from "../dict/DictionaryService.js";
+import { createRoundManager } from "./RoundManager.js";
+import { createValidator } from "./Validator.js";
 
 /**
  * The orchestrator, and the authority.
- *
- * Authority model, which everything else depends on:
  *
  *   GUEST                          HOST
  *     intent   ───────────────▶     validate → mutate → broadcast
@@ -22,17 +24,21 @@ import { MSG } from "../net/Protocol.js";
  * A guest never mutates authoritative state. It sends intents and renders
  * whatever snapshot comes back. That is what makes "both players always see the
  * same game state" true by construction rather than by careful bookkeeping — a
- * guest has no local copy of the rules that could disagree.
+ * guest holds no copy of the rules that could disagree.
  *
  * The cost is that the host is the server: when the host leaves, the room ends.
- * That is handled explicitly (see FAILURE.HOST_LEFT) rather than hidden.
+ * That is handled explicitly (FAILURE.HOST_LEFT), not hidden.
+ *
+ * Only the host builds a RoundManager and a DictionaryService. A guest asking
+ * the dictionary independently could get a different answer from a flaky API and
+ * desync the match, so there is exactly one asker.
  */
 
 const PLAYER_ID_KEY = "wordrace.playerId";
 
 /**
- * A stable identity for this tab that survives reload, so a reconnecting
- * player can reclaim their seat and score instead of arriving as a stranger.
+ * A stable identity for this tab that survives reload, so a reconnecting player
+ * reclaims their seat and score instead of arriving as a stranger.
  *
  * @returns {string}
  */
@@ -52,6 +58,7 @@ function resolveLocalPlayerId() {
  *   store: object,
  *   toaster: object,
  *   navigate: (screen: string) => void,
+ *   onWordRejected: (reason: string) => void,
  *   createNetwork?: typeof createNetworkClient
  * }} deps
  */
@@ -59,17 +66,26 @@ export function createGameManager({
   store,
   toaster,
   navigate,
+  onWordRejected,
   createNetwork = createNetworkClient,
 }) {
   /** @type {ReturnType<typeof createNetworkClient>|null} */
   let net = null;
+  /** @type {ReturnType<typeof createRoundManager>|null} */
+  let round = null;
+  /** @type {ReturnType<typeof createDictionaryService>|null} */
+  let dictionary = null;
 
   /* ---- Snapshots ------------------------------------------------------
-     The snapshot is the authoritative slice only. Identity, role, and which
-     screen you are looking at are local concerns and stay local — sending them
-     would let the host move the guest's cursor, so to speak. */
+     The authoritative slice only. Identity, role and which screen you are
+     looking at stay local — publishing them would let the host move the guest's
+     cursor, so to speak.
 
-  /** @returns {object} the authoritative slice of state */
+     Note what is absent: committed letters. `match.committed` carries booleans,
+     never the letters themselves, so a guest cannot read their opponent's letter
+     out of the snapshot before the reveal. */
+
+  /** @returns {object} */
   function buildSnapshot() {
     const state = store.getState();
     return {
@@ -96,17 +112,48 @@ export function createGameManager({
     net.send(MSG.SNAPSHOT, { state: buildSnapshot() });
   }
 
+  /** @returns {string|undefined} the other seat's id */
+  function guestId() {
+    const state = store.getState();
+    return state.playerOrder.find((id) => id !== state.localPlayerId);
+  }
+
+  /* ---- Host-side round machine ----------------------------------------- */
+
+  function ensureRoundMachine() {
+    if (round) return round;
+    dictionary = createDictionaryService();
+    const validator = createValidator({ dictionary });
+    round = createRoundManager({
+      store,
+      validator,
+      dictionary,
+      onChange: broadcast,
+      onRejection(playerId, reason) {
+        // Routed to whoever submitted, and only to them: the opponent has no
+        // business learning what you tried.
+        if (playerId === store.getState().localPlayerId) onWordRejected(reason);
+        else net?.send(MSG.WORD_REJECTED, { reason });
+      },
+    });
+    return round;
+  }
+
   /* ---- Failure --------------------------------------------------------- */
 
   /** @param {string} code a FAILURE value */
   function fail(code) {
     const copy = describeFailure(code);
+    round?.stop();
     store.set({ connection: CONNECTION.CLOSED, failure: { code, ...copy } });
     navigate(SCREEN.ERROR);
   }
 
   /** Drops the network and returns the store to a clean pre-room state. */
   function teardown() {
+    round?.stop();
+    round = null;
+    dictionary = null;
     net?.close();
     net = null;
     const fresh = createInitialState();
@@ -177,58 +224,73 @@ export function createGameManager({
       store.set({
         connection: CONNECTION.CONNECTED,
         players: { ...state.players, [player.id]: player },
-        playerOrder: isReturning
-          ? state.playerOrder
-          : [...state.playerOrder, player.id],
+        playerOrder: isReturning ? state.playerOrder : [...state.playerOrder, player.id],
       });
 
       net.send(MSG.WELCOME, { playerId: player.id, state: buildSnapshot() });
       broadcast();
-      toaster.show(
-        isReturning ? `${player.name} is back.` : `${player.name} joined.`,
-        { tone: "good" },
-      );
+      toaster.show(isReturning ? `${player.name} is back.` : `${player.name} joined.`, {
+        tone: "good",
+      });
     });
 
-    net.on(MSG.READY, (payload, message) => {
-      const state = store.getState();
-      const guestId = state.playerOrder.find((id) => id !== state.localPlayerId);
-      if (!guestId) return;
-      setReady(guestId, payload.ready);
-      void message;
+    net.on(MSG.READY, (payload) => {
+      const id = guestId();
+      if (id) setReady(id, payload.ready);
+    });
+
+    net.on(MSG.LETTER, (payload) => {
+      const id = guestId();
+      if (!id || !round) return;
+      // The letter goes into RoundManager's private map, never into state.
+      round.submitLetter(id, payload.letter);
+    });
+
+    net.on(MSG.WORD, (payload) => {
+      const id = guestId();
+      if (!id || !round) return;
+      round.submitWord({
+        playerId: id,
+        word: payload.word,
+        // Convert the guest's clock into ours before anything compares times.
+        correctedTime: net.toLocalTime(payload.clientTime),
+        roundId: payload.roundId,
+      });
     });
 
     net.on(MSG.LEAVE, () => {
       const state = store.getState();
-      const guestId = state.playerOrder.find((id) => id !== state.localPlayerId);
-      if (!guestId) return;
+      const id = guestId();
+      if (!id) return;
       const players = { ...state.players };
-      const name = players[guestId]?.name ?? "Your opponent";
-      delete players[guestId];
+      const name = players[id]?.name ?? "Your opponent";
+      delete players[id];
       store.set({
         players,
-        playerOrder: state.playerOrder.filter((id) => id !== guestId),
+        playerOrder: state.playerOrder.filter((pid) => pid !== id),
         connection: CONNECTION.WAITING,
       });
+      // No opponent means no race. Park everyone in the lobby.
+      round?.returnToLobby();
       broadcast();
       toaster.show(`${name} left the room.`, { tone: "info" });
     });
 
     net.onLifecycle({
       close() {
-        // The seat is kept, not cleared: the score and readiness belong to the
-        // player, and Phase 5 lets them reclaim both on reconnect.
+        // The seat is kept, not cleared: score and readiness belong to the
+        // player, and a reconnect reclaims both.
         const state = store.getState();
-        const guestId = state.playerOrder.find((id) => id !== state.localPlayerId);
-        if (!guestId || !state.players[guestId]) return;
+        const id = guestId();
+        if (!id || !state.players[id]) return;
         store.set({
           connection: CONNECTION.WAITING,
           players: {
             ...state.players,
-            [guestId]: { ...state.players[guestId], connected: false, ready: false },
+            [id]: { ...state.players[id], connected: false, ready: false },
           },
         });
-        toaster.show(`${state.players[guestId].name} dropped out.`, { tone: "bad" });
+        toaster.show(`${state.players[id].name} dropped out.`, { tone: "bad" });
       },
       failure(code) {
         fail(code);
@@ -274,9 +336,9 @@ export function createGameManager({
       navigate(SCREEN.LOBBY);
     });
 
-    net.on(MSG.SNAPSHOT, (payload) => {
-      applySnapshot(payload.state);
-    });
+    net.on(MSG.SNAPSHOT, (payload) => applySnapshot(payload.state));
+
+    net.on(MSG.WORD_REJECTED, (payload) => onWordRejected(payload.reason));
 
     net.on(MSG.REJECT, (payload) => {
       net?.close();
@@ -292,8 +354,6 @@ export function createGameManager({
 
     net.onLifecycle({
       close() {
-        // Reconnect handling arrives in Phase 5. Until then, losing the host is
-        // stated plainly instead of leaving the player on a frozen board.
         if (!net) return;
         fail(FAILURE.HOST_LEFT);
       },
@@ -303,12 +363,11 @@ export function createGameManager({
     });
   }
 
-  /* ---- Shared intents -------------------------------------------------- */
+  /* ---- Shared -------------------------------------------------------- */
 
   /**
-   * Host-side readiness mutation. The guest reaches this by sending MSG.READY;
-   * the host reaches it directly. Both paths converge here so there is one
-   * implementation of the rule.
+   * Host-side readiness mutation. A guest reaches it via MSG.READY, the host
+   * directly, so there is one implementation of the rule.
    *
    * @param {string} playerId
    * @param {boolean} ready
@@ -317,9 +376,7 @@ export function createGameManager({
     const state = store.getState();
     const player = state.players[playerId];
     if (!player) return;
-    store.set({
-      players: { ...state.players, [playerId]: { ...player, ready } },
-    });
+    store.set({ players: { ...state.players, [playerId]: { ...player, ready } } });
     broadcast();
   }
 
@@ -334,19 +391,78 @@ export function createGameManager({
       if (!local) return;
       if (state.role === ROLE.HOST) {
         setReady(local.id, !local.ready);
-      } else {
-        // Optimistic: the host's snapshot is authoritative and will correct this
-        // if it disagrees, but the button should not feel laggy.
-        store.set({
-          players: { ...state.players, [local.id]: { ...local, ready: !local.ready } },
-        });
-        net?.send(MSG.READY, { ready: !local.ready });
+        return;
       }
+      // Optimistic: the host's snapshot is authoritative and will correct this
+      // if it disagrees, but the button should not feel laggy.
+      store.set({
+        players: { ...state.players, [local.id]: { ...local, ready: !local.ready } },
+      });
+      net?.send(MSG.READY, { ready: !local.ready });
     },
 
-    /** Placeholder until Phase 2 owns the round machine. */
-    startGame() {
-      toaster.show("The round machine lands in the next phase.", { tone: "info" });
+    /** Host only. Deals the first round. */
+    async startGame() {
+      const state = store.getState();
+      if (state.role !== ROLE.HOST) return;
+      if (state.playerOrder.length < MAX_PLAYERS) {
+        toaster.show("Wait for your opponent to join.", { tone: "info" });
+        return;
+      }
+      await ensureRoundMachine().startMatch();
+    },
+
+    /** Host only. */
+    nextRound() {
+      round?.nextRound();
+    },
+
+    /** Host only. */
+    restartMatch() {
+      round?.restartMatch();
+    },
+
+    /** Host only. */
+    returnToLobby() {
+      round?.returnToLobby();
+    },
+
+    /**
+     * Commits the local player's secret letter.
+     * @param {string} letter
+     */
+    submitLetter(letter) {
+      const state = store.getState();
+      if (state.role === ROLE.HOST) {
+        round?.submitLetter(state.localPlayerId, letter);
+        return;
+      }
+      net?.send(MSG.LETTER, { letter, roundId: state.match.roundId });
+    },
+
+    /**
+     * Offers the local player's word.
+     * @param {string} word
+     */
+    submitWord(word) {
+      const state = store.getState();
+      if (state.match.phase !== PHASE.RACE) return;
+
+      if (state.role === ROLE.HOST) {
+        round?.submitWord({
+          playerId: state.localPlayerId,
+          word,
+          // The host's own clock needs no correction.
+          correctedTime: Date.now(),
+          roundId: state.match.roundId,
+        });
+        return;
+      }
+      net?.send(MSG.WORD, {
+        word,
+        roundId: state.match.roundId,
+        clientTime: Date.now(),
+      });
     },
 
     leaveRoom() {
@@ -363,9 +479,13 @@ export function createGameManager({
       navigate(SCREEN.HOME);
     },
 
-    /** @returns {object|null} network counters, for end-to-end verification */
+    /** @returns {object} counters for the end-to-end verification */
     diagnostics() {
-      return net?.diagnostics() ?? null;
+      return {
+        network: net?.diagnostics() ?? null,
+        round: round?.diagnostics() ?? null,
+        dictionary: dictionary?.diagnostics() ?? null,
+      };
     },
   };
 }

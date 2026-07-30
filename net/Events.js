@@ -56,6 +56,8 @@ const PAYLOAD_RULES = Object.freeze({
     Number.isInteger(p.roundId) &&
     Number.isFinite(p.clientTime),
 
+  [MSG.WORD_REJECTED]: (p) => isNonEmptyString(p.reason, 64),
+
   [MSG.ROOM_CLOSED]: (p) => isNonEmptyString(p.code, 64),
 
   [MSG.PING]: (p) => Number.isFinite(p.id),

@@ -1,8 +1,10 @@
-import { MAX_NAME_LENGTH, SCREEN } from "./constants.js";
+import { MAX_NAME_LENGTH, PHASE, SCREEN } from "./constants.js";
+import { describeRejection } from "./messages.js";
 import { createRouter, isValidRoomCode } from "./router.js";
 import { createStore } from "./state.js";
 import { createGameManager } from "../game/GameManager.js";
 import { createLobbyManager } from "../game/LobbyManager.js";
+import { createBoard } from "../ui/Board.js";
 import { createHeroDemo } from "../ui/HeroDemo.js";
 import { createScreens } from "../ui/Screen.js";
 import { createAnnouncer, createToaster } from "../ui/Toast.js";
@@ -34,6 +36,18 @@ function boot() {
     errorTitle: document.getElementById("error-title"),
     errorDetail: document.getElementById("error-detail"),
     errorActions: document.getElementById("error-actions"),
+    overlayRoot: document.getElementById("overlay-root"),
+    scoreboard: document.getElementById("scoreboard"),
+    phaseLabel: document.getElementById("phase-label"),
+    standoff: document.getElementById("board-standoff"),
+    slotA: document.getElementById("slot-a"),
+    slotB: document.getElementById("slot-b"),
+    rule: document.getElementById("board-rule"),
+    wordForm: document.getElementById("word-form"),
+    wordInput: document.getElementById("word-input"),
+    timer: document.getElementById("timer"),
+    timerFill: document.getElementById("timer-fill"),
+    gameActions: document.getElementById("game-actions"),
   };
 
   const store = createStore();
@@ -64,7 +78,42 @@ function boot() {
     router.syncUrl(screen, store.getState().roomCode);
   }
 
-  const game = createGameManager({ store, toaster, navigate });
+  /* `board` is referenced by the game manager's rejection callback and holds a
+     reference to the manager's actions, so one of the two has to be created
+     first. A late-bound closure breaks the cycle without a mutable module. */
+  let board = null;
+
+  const game = createGameManager({
+    store,
+    toaster,
+    navigate,
+    onWordRejected: (reason) => board?.rejectWord(describeRejection(reason)),
+  });
+
+  board = createBoard({
+    dom: {
+      scoreboard: dom.scoreboard,
+      phaseLabel: dom.phaseLabel,
+      standoff: dom.standoff,
+      slotA: dom.slotA,
+      slotB: dom.slotB,
+      rule: dom.rule,
+      wordForm: dom.wordForm,
+      wordInput: dom.wordInput,
+      timer: dom.timer,
+      timerFill: dom.timerFill,
+      actions: dom.gameActions,
+      overlayRoot: dom.overlayRoot,
+    },
+    announcer,
+    toaster,
+    actions: {
+      submitLetter: (letter) => game.submitLetter(letter),
+      nextRound: () => game.nextRound(),
+      restartMatch: () => game.restartMatch(),
+      returnToLobby: () => game.returnToLobby(),
+    },
+  });
 
   const lobby = createLobbyManager({
     store,
@@ -86,8 +135,28 @@ function boot() {
      Because the store batches writes into a microtask, a burst of related
      updates produces a single render rather than a half-applied one. */
   store.subscribe((state) => {
+    /* The match phase decides which screen you are on, for both roles. A guest
+       has no local game logic, so this is how it follows the host into and out
+       of a match: the snapshot changes the phase, and the screen follows. */
+    const inMatch = state.match.phase !== PHASE.LOBBY;
+    if (inMatch && state.screen === SCREEN.LOBBY) navigate(SCREEN.GAME, { focus: false });
+    if (!inMatch && state.screen === SCREEN.GAME) {
+      board.teardown();
+      navigate(SCREEN.LOBBY);
+    }
+
     if (state.screen === SCREEN.LOBBY) lobby.render(state);
+    if (state.screen === SCREEN.GAME) board.render(state);
     if (state.screen === SCREEN.ERROR) renderFailure(state);
+  });
+
+  /* The word race. Submitting clears nothing: if the word is rejected the
+     player almost always wants to edit what they typed, not retype it. */
+  dom.wordForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const word = dom.wordInput.value.trim();
+    if (word.length === 0) return;
+    game.submitWord(word);
   });
 
   function renderFailure(state) {
@@ -234,7 +303,7 @@ function boot() {
   }
 
   // Handles for the browser-driven end-to-end checks in each phase's verification.
-  window.__wordRace = { store, router, screens, toaster, announcer, game, navigate };
+  window.__wordRace = { store, router, screens, toaster, announcer, game, board, navigate };
 }
 
 if (document.readyState === "loading") {

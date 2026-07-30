@@ -81,6 +81,13 @@ export function createInitialMatch() {
     /** Lowercase words already spent this match; a word may only win once. */
     /** @type {string[]} */
     usedWords: [],
+
+    /**
+     * A short message both players should see, carried in the snapshot so the
+     * two screens cannot disagree about it. The UI toasts it when `id` changes.
+     * @type {{id: number, text: string, tone: string}|null}
+     */
+    notice: null,
   };
 }
 

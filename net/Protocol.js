@@ -35,6 +35,10 @@ export const MSG = Object.freeze({
   WORD: "word",
   LEAVE: "leave",
 
+  /* host → guest: your word didn't count, and why. Addressed to one player,
+     unlike a notice, because only the submitter needs to see it. */
+  WORD_REJECTED: "word-rejected",
+
   /* host → guest: the room is over */
   ROOM_CLOSED: "room-closed",
 
@@ -59,6 +63,7 @@ export const HOST_TO_GUEST = Object.freeze([
   MSG.WELCOME,
   MSG.REJECT,
   MSG.SNAPSHOT,
+  MSG.WORD_REJECTED,
   MSG.ROOM_CLOSED,
   MSG.PING,
   MSG.PONG,
