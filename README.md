@@ -79,7 +79,36 @@ Settings lock once a match is running. Changing them mid-round would rewrite a r
 
 Only two people play each round; everyone else watches. That means the round machine cannot assume "everyone picks a letter and races", so `match.activeIds` names who is playing and everyone absent from it is an observer. It is published in the snapshot rather than derived client-side, so the board never has to re-implement the pairing rule to know who is up.
 
-Observers see the board, the revealed letters and the running clock — spectating is dull otherwise — but get no letter tile and no word field, and the scoreboard tags everyone *Duelling* or *Watching*.
+Observers are on the live board, not parked in the lobby. They get the tiles flipping face-down as each duellist locks in, the 3·2·1 countdown, the simultaneous reveal, the ticking clock, and the winning word with confetti — all in real time. They get no letter tile and no word field, and the scoreboard tags everyone *Duelling* or *Watching*.
+
+### The live feed, and why only spectators get it
+
+Everything above still left the race itself dead: between reveal and result the only thing moving on a spectator's screen was the timer bar. Thirty to ninety seconds of watching a bar shrink.
+
+The fix is a **live activity feed** — each duellist's current word length as a row of pips, plus how many attempts they have burned:
+
+```
+Bob    ▮▮▮▮▮▮▮        typing · 7
+Cara   ·               thinking      2 tried
+```
+
+A typing indicator was deliberately left out for *duellists*, because knowing your rival is seven characters in is real competitive information. Spectators cannot submit, so for them the same data is pure theatre. That asymmetry is the whole design:
+
+- It travels by **targeted message** (`ACTIVITY_RELAY` via `sendTo`), addressed only at players observing this round.
+- It is **never in the snapshot**, which is what would broadcast it to the rival.
+- It lives in board-local view state, not the store, so it cannot leak in on a re-render.
+- **Length only, never text.** The `ACTIVITY` payload validator accepts an integer and nothing else, so the shape check is also the guarantee that no words are travelling.
+- Reports are throttled (220ms) — a message per keystroke would flood the same channel the race is being decided on.
+
+Verified adversarially with three tabs. While one duellist had an unsubmitted word:
+
+| Viewer | Sees the feed | Sees the word |
+| --- | --- | --- |
+| Spectator | yes — `typing · 4`, 4 pips, `1 tried` | **no** |
+| Rival duellist | no feed, no pips, no activity in state | **no** |
+| The typer | no feed of their own | n/a |
+
+The rival's serialized state and full DOM were searched for the word being typed: absent from both.
 
 **The rules are enforced on the host, not in the UI.** A spectator's `submitLetter` and `submitWord` are both refused with `NOT_PLAYING`, because the UI that hides those controls runs on a machine we do not control. Verified by having the host itself observe a round and try to submit: refused, and the submission never even reached the queue.
 
@@ -92,6 +121,8 @@ for (i) for (j > i) pairs.push([i, j])      // unfair
 — produces every pairing exactly once but in a badly lopsided order. With four players it deals `0-1, 0-2, 0-3, 1-2, 1-3, 2-3`, so player 0 duels three rounds back to back and then sits out three, and nobody wants to be player 3 watching the first half of every cycle. The circle method fixes one seat and rotates the rest, which cuts the longest consecutive run from 3 to 2 and keeps appearances even. An odd roster gets a phantom bye seat, so three players get a clean three-pairing cycle.
 
 The schedule is derived from the current roster each round rather than stored, so someone joining or leaving reshapes the rotation instead of leaving stale pairings pointing at a player who left.
+
+**Only connected players get dealt in.** A player whose tab died was originally still paired, and the round then sat in letter entry until the 45-second auto-commit rescued it — everyone waiting on someone who was not there. Pairings now skip disconnected players; their seat and score are still held for a reconnect, they are just passed over in the rotation while away.
 
 ---
 
@@ -471,7 +502,7 @@ What was verified end to end: room creation on the public broker, join by code a
 - Spectators and more than two players.
 - Word definitions on the result screen — the API already returns them.
 - Rematch with the same opponent, and match history.
-- An optional typing indicator. The protocol has a slot reserved and it is deliberately unimplemented: during a race, seeing your opponent type six characters tells you they have found something.
+- A typing indicator for *duellists*. Spectators have one; competitors deliberately do not, and probably never should — seeing your rival type six characters tells you they have found something.
 - A "not me" control to clear the saved profile.
 - Sound. A split-flap clack on reveal and a bell on a win would carry a lot of the feel.
 
