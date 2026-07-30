@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Two ink passes, overlapping. The overlap is the whole idea. -->
+  <rect width="32" height="32" rx="7" fill="#FBF3F6" />
+  <g style="mix-blend-mode: multiply">
+    <rect x="3" y="7" width="16" height="18" rx="4" fill="#FF4F8B" />
+    <rect x="13" y="7" width="16" height="18" rx="4" fill="#2C4BFF" />
+  </g>
+</svg>

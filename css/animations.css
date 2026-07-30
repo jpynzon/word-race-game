@@ -1,0 +1,330 @@
+@layer animations {
+  /* Motion is spent in three orchestrated places — the countdown, the reveal,
+     and the win — plus one piece of ambient idle on the home screen. Every
+     arrival uses --ease-boing so things land rather than fade in. */
+
+  /* ---- Ambient: the standoff, idling --------------------------------------
+     On the home screen only. The two tiles breathe in opposite phase, which
+     makes them read as two opponents sizing each other up rather than two
+     rectangles. Slow and small enough not to demand attention. */
+  @keyframes idle-a {
+    50% {
+      transform: rotate(calc(var(--tilt-a) - 1.5deg)) translateY(-5px);
+    }
+  }
+
+  @keyframes idle-b {
+    50% {
+      transform: rotate(calc(var(--tilt-b) + 1.5deg)) translateY(4px);
+    }
+  }
+
+  .standoff--idle .tile--a {
+    animation: idle-a 4.2s var(--ease-in-out) infinite;
+  }
+
+  .standoff--idle .tile--b {
+    animation: idle-b 4.2s var(--ease-in-out) infinite;
+    animation-delay: -2.1s; /* opposite phase */
+  }
+
+  /* ---- 1. Countdown ---------------------------------------------------
+     The number stamps down hard, and the tiles lean toward each other as the
+     clock runs, so the standoff visibly tightens before it breaks. */
+  @keyframes stamp {
+    0% {
+      transform: scale(2.1) rotate(-14deg);
+      opacity: 0;
+    }
+    26% {
+      transform: scale(0.9) rotate(3deg);
+      opacity: 1;
+    }
+    44% {
+      transform: scale(1.06) rotate(-1deg);
+    }
+    70% {
+      transform: scale(1) rotate(0deg);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(0.92) rotate(0deg);
+      opacity: 0.12;
+    }
+  }
+
+  @keyframes converge {
+    to {
+      transform: rotate(var(--tile-tilt)) translateX(var(--converge-x, 0)) scale(1.04);
+    }
+  }
+
+  .countdown__number {
+    animation: stamp 1s var(--ease-boing) both;
+  }
+
+  /* Named sides, not positional selectors: board tiles are each wrapped in a
+     slot, so :first-of-type would match both. */
+  .standoff--tense .tile--a {
+    --converge-x: 0.6rem;
+  }
+
+  .standoff--tense .tile--b {
+    --converge-x: -0.6rem;
+  }
+
+  .standoff--tense .tile {
+    animation: converge 3s var(--ease-in-out) both;
+  }
+
+  /* ---- 2. Reveal ------------------------------------------------------
+     A split-flap board: the tile falls forward onto its stop and settles.
+     Both tiles run the same animation with no stagger, because the rules say
+     the letters are revealed simultaneously. */
+  @keyframes flap {
+    0% {
+      transform: rotate(var(--tile-tilt)) rotateX(-92deg);
+    }
+    100% {
+      transform: rotate(var(--tile-tilt)) rotateX(0deg);
+    }
+  }
+
+  /* The bridge bands grow out from the centre as the letters land, so the
+     overprint appears at the same moment the two letters become one rule.
+     Animating inline-size keeps both bands out of their own stacking contexts;
+     a scale transform would isolate each one and kill the multiply. */
+  @keyframes bridge-grow {
+    0% {
+      inline-size: var(--bridge-overlap);
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+
+  .standoff--reveal {
+    perspective: 900px;
+  }
+
+  .tile--reveal {
+    transform-origin: center top;
+    animation: flap var(--dur-flap) var(--ease-flap) both;
+  }
+
+  .standoff--reveal.is-revealing .bridge__ink {
+    animation: bridge-grow var(--dur-flap) var(--ease-out) both;
+  }
+
+  /* ---- 3. Win ---------------------------------------------------------
+     Misregistration: on a real press, a colour pass that lands out of
+     alignment splits into visible fringes. Here the whole board jolts out of
+     register and snaps back. */
+  @keyframes misregister {
+    0%,
+    100% {
+      transform: translate(0, 0) rotate(0deg);
+      filter: none;
+    }
+    18% {
+      transform: translate(-5px, 2px) rotate(-1.5deg);
+      filter: drop-shadow(6px 0 0 rgb(255 77 141 / 60%))
+        drop-shadow(-6px 0 0 rgb(61 90 255 / 60%));
+    }
+    46% {
+      transform: translate(5px, -2px) rotate(1.5deg);
+      filter: drop-shadow(-4px 0 0 rgb(255 77 141 / 45%))
+        drop-shadow(4px 0 0 rgb(61 90 255 / 45%));
+    }
+    74% {
+      transform: translate(-2px, 0) rotate(-0.5deg);
+      filter: drop-shadow(2px 0 0 rgb(123 43 181 / 35%));
+    }
+  }
+
+  .is-jolting {
+    animation: misregister 480ms var(--ease-in-out) both;
+  }
+
+  /* Confetti bits are tiny paper tiles in the winner's ink, built in JS and
+     removed on animationend. */
+  .confetti {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-toast);
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  @keyframes confetti-fall {
+    0% {
+      transform: translate3d(0, -12vh, 0) rotate(0deg);
+      opacity: 1;
+    }
+    100% {
+      transform: translate3d(var(--drift, 0), 112vh, 0) rotate(var(--spin, 540deg));
+      opacity: 0.9;
+    }
+  }
+
+  .confetti__bit {
+    position: absolute;
+    inline-size: 0.75rem;
+    aspect-ratio: 4 / 5;
+    border: 2px solid var(--ink);
+    border-radius: 4px;
+    background-color: var(--player-ink);
+    animation: confetti-fall var(--fall, 2.4s) var(--ease-in-out) both;
+    animation-delay: var(--delay, 0ms);
+  }
+
+  /* ---- Functional feedback ------------------------------------------- */
+  @keyframes shake {
+    0%,
+    100% {
+      transform: translateX(0) rotate(0deg);
+    }
+    20% {
+      transform: translateX(-9px) rotate(-1.5deg);
+    }
+    40% {
+      transform: translateX(8px) rotate(1.5deg);
+    }
+    60% {
+      transform: translateX(-5px) rotate(-1deg);
+    }
+    80% {
+      transform: translateX(3px) rotate(0.5deg);
+    }
+  }
+
+  .is-rejected {
+    animation: shake 360ms var(--ease-in-out) both;
+    border-color: var(--ink-pink) !important;
+    box-shadow: 4px 5px 0 var(--ink-pink) !important;
+  }
+
+  @keyframes accept {
+    0% {
+      box-shadow: 4px 5px 0 var(--ink-mint), 0 0 0 0 rgb(43 224 168 / 80%);
+    }
+    100% {
+      box-shadow: 4px 5px 0 var(--ink-mint), 0 0 0 26px rgb(43 224 168 / 0%);
+    }
+  }
+
+  .is-accepted {
+    border-color: var(--ink-mint) !important;
+    animation: accept 640ms var(--ease-out) both;
+  }
+
+  @keyframes pop-in {
+    0% {
+      transform: translateY(18px) scale(0.9);
+      opacity: 0;
+    }
+    100% {
+      transform: translateY(0) scale(1);
+      opacity: 1;
+    }
+  }
+
+  .toast {
+    animation: pop-in var(--dur-slow) var(--ease-boing) both;
+  }
+
+  .toast[data-leaving="true"] {
+    animation: pop-in var(--dur-base) var(--ease-in-out) reverse both;
+  }
+
+  .modal,
+  .overlay {
+    animation: pop-in var(--dur-slow) var(--ease-boing) both;
+  }
+
+  @keyframes score-bump {
+    40% {
+      transform: scale(1.55) rotate(-6deg);
+      color: var(--ink-mint);
+    }
+    70% {
+      transform: scale(0.94) rotate(3deg);
+    }
+  }
+
+  .is-scoring {
+    animation: score-bump 560ms var(--ease-boing) both;
+  }
+
+  /* Loading: an ink pass sweeping across the sheet. */
+  @keyframes shimmer {
+    to {
+      background-position: 200% 0;
+    }
+  }
+
+  .is-loading {
+    background-image: linear-gradient(
+      100deg,
+      var(--paper-deep) 20%,
+      var(--paper) 42%,
+      var(--paper-deep) 64%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.4s linear infinite;
+  }
+
+  /* The hero demo types the bridging word out one glyph at a time. */
+  @keyframes caret {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  .hero__caret {
+    display: inline-block;
+    inline-size: 0.14em;
+    height: 0.9em;
+    vertical-align: -0.06em;
+    background-color: var(--overprint);
+    border-radius: 2px;
+    animation: caret 1s steps(1, end) infinite;
+  }
+
+  /* ---- Reduced motion -------------------------------------------------
+     Transitions collapse to instant state changes. The countdown keeps
+     counting, because the number is the information, not the animation. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 1ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 1ms !important;
+      scroll-behavior: auto !important;
+    }
+
+    .countdown__number {
+      animation: none;
+      opacity: 1;
+      transform: none;
+    }
+
+    .standoff--idle .tile--a,
+    .standoff--idle .tile--b {
+      animation: none;
+    }
+
+    .hero__caret,
+    .confetti {
+      display: none;
+    }
+
+    .is-loading {
+      animation: none;
+      background-image: none;
+      background-color: var(--paper-deep);
+    }
+  }
+}

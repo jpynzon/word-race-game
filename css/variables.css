@@ -1,0 +1,150 @@
+@layer tokens {
+  :root {
+    /* ---- Inks -----------------------------------------------------------
+       Still a riso press: a few flat, loud spot colours on paper, no gradient
+       mesh and no photographic depth. Turned up, though — this is a party
+       game, and timid colour was reading as unfinished. */
+    --paper: #fff3f7;
+    --paper-deep: #ffe2ee;
+    --paper-edge: #f7cbdf;
+
+    --ink: #2b1b3d;
+    --ink-soft: rgb(43 27 61 / 66%);
+    --ink-faint: rgb(43 27 61 / 36%);
+    --ink-hairline: rgb(43 27 61 / 16%);
+
+    --ink-pink: #ff4d8d; /* Player A */
+    --ink-blue: #3d5aff; /* Player B */
+    --ink-mint: #2be0a8; /* valid, win */
+    --ink-sun: #ffd23f; /* countdown, warning */
+    --ink-tangerine: #ff8a3d; /* accents, stickers */
+
+    /* Where pink and blue overprint. Sampled from the multiply result so
+       borders and text can match the blend exactly. */
+    --overprint: #7b2bb5;
+    --overprint-soft: rgb(123 43 181 / 14%);
+
+    /* Components read --player-ink and never branch on which player they are. */
+    --player-ink: var(--ink-pink);
+
+    /* ---- Type -----------------------------------------------------------
+       Two rounded faces, and nothing else. Baloo 2 at 800 is fat, fully
+       rounded, and has the single-glyph presence a letter tile needs. Nunito
+       is its rounded companion for prose and labels.
+
+       There is deliberately no monospace: the room code sits in fixed-width
+       digit boxes and the countdown sits in a fixed-size container, so the
+       layout cannot reflow as digits change and tabular figures buy nothing. */
+    --font-display: "Baloo 2", "Comic Sans MS", system-ui, sans-serif;
+    --font-body: "Nunito", system-ui, -apple-system, sans-serif;
+
+    --text-xs: 0.8125rem;
+    --text-sm: 0.9375rem;
+    --text-base: 1.0625rem;
+    --text-lg: clamp(1.125rem, 1rem + 0.5vw, 1.375rem);
+    --text-xl: clamp(1.375rem, 1.15rem + 1vw, 1.875rem);
+    --text-2xl: clamp(1.75rem, 1.4rem + 1.8vw, 2.75rem);
+    --text-3xl: clamp(2.5rem, 1.75rem + 3.4vw, 4.75rem);
+    --text-tile: clamp(4rem, 2.5rem + 7.5vw, 8rem);
+    --text-count: clamp(6.5rem, 3rem + 20vw, 15rem);
+
+    --tracking-tight: -0.02em;
+    --tracking-wide: 0.06em;
+    --tracking-caps: 0.14em;
+
+    /* ---- Space ---------------------------------------------------------- */
+    --space-1: 0.25rem;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-5: 1.5rem;
+    --space-6: 2rem;
+    --space-7: 3rem;
+    --space-8: 4rem;
+
+    --gutter: clamp(1rem, 0.6rem + 2.5vw, 2.5rem);
+    --measure: 34rem;
+    --shell-max: 68rem;
+
+    /* ---- Shape ---------------------------------------------------------
+       Sticker rules: thick outlines, generous radii, nothing perfectly square.
+       The tilt tokens are what stop the layout looking like a wireframe —
+       every card and tile is placed by hand, slightly off true. */
+    --stroke: 3px;
+    --stroke-thin: 2px;
+
+    --radius-sm: 0.875rem;
+    --radius-md: 1.375rem;
+    --radius-lg: 1.75rem;
+    /* Tile radius scales with the tile: a fixed 1.75rem turns a small tile into
+       a circle, which stops reading as a printed tile at all. */
+    --radius-tile: calc(var(--tile-size) * 0.16);
+    --radius-pill: 999px;
+
+    --tilt-a: -2.5deg;
+    --tilt-b: 2.5deg;
+    --tilt-nudge: -1.25deg;
+
+    --tile-size: clamp(5.5rem, 3rem + 20vw, 9.5rem);
+
+    /* ---- Depth ---------------------------------------------------------
+       A riso print has no soft glow, so depth is a hard offset: the ink
+       outline repeated below and to the right, like a die-cut sticker lifted
+       off the sheet. */
+    --offset-sm: 3px 4px 0 var(--ink);
+    --offset-md: 5px 6px 0 var(--ink);
+    --offset-lg: 8px 10px 0 var(--ink);
+    --ambient: 0 12px 28px -18px rgb(43 27 61 / 45%);
+    --ambient-lift: 0 22px 44px -20px rgb(43 27 61 / 50%);
+
+    /* ---- Motion --------------------------------------------------------
+       --ease-boing overshoots hard and settles. It is the house easing: every
+       arrival in this game should feel like a thing landing, not fading in. */
+    --dur-fast: 120ms;
+    --dur-base: 200ms;
+    --dur-slow: 340ms;
+    --dur-flap: 560ms;
+    --ease-out: cubic-bezier(0.22, 0.75, 0.3, 1);
+    --ease-in-out: cubic-bezier(0.6, 0, 0.35, 1);
+    --ease-boing: cubic-bezier(0.34, 1.56, 0.44, 1);
+    --ease-flap: cubic-bezier(0.3, 1.5, 0.5, 1);
+
+    /* ---- Print texture -------------------------------------------------
+       All generated, no image requests. Grain is an inline feTurbulence the
+       browser rasterises once; the dot grid is the sheet this game is printed
+       on and does more for the "made thing" feeling than any illustration. */
+    --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23g)'/%3E%3C/svg%3E");
+    --grain-opacity: 0.2;
+
+    --dot-grid: radial-gradient(circle, rgb(43 27 61 / 10%) 1.5px, transparent 1.6px);
+    --dot-grid-size: 24px 24px;
+
+    --halftone: repeating-radial-gradient(
+      circle at 0 0,
+      rgb(43 27 61 / 16%) 0 1px,
+      transparent 1px 6px
+    );
+
+    --z-board: 1;
+    --z-sticky: 20;
+    --z-toast: 60;
+    --z-overlay: 80;
+    --z-modal: 90;
+  }
+
+  /* The countdown pushes the grain harder, so the sheet looks like it is being
+     printed while the clock runs. */
+  :root[data-tension="high"] {
+    --grain-opacity: 0.38;
+  }
+
+  /* A phone held sideways has almost no vertical room, so tiles and the
+     countdown scale off the short axis instead of the long one. */
+  @media (height <= 32rem) and (orientation: landscape) {
+    :root {
+      --tile-size: clamp(3.25rem, 0.5rem + 13vh, 5.5rem);
+      --text-tile: clamp(2rem, 0.5rem + 8vh, 3.5rem);
+      --text-count: clamp(3rem, 0.5rem + 24vh, 6.5rem);
+    }
+  }
+}

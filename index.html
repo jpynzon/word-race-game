@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Word Race — a two-player letter duel</title>
+    <meta
+      name="description"
+      content="Two players pick one secret letter each. On reveal, race to type a real English word that starts with the first letter and ends with the second."
+    />
+    <meta name="theme-color" content="#FBF3F6" />
+    <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400..800&family=Nunito:ital,wght@0,400..900;1,400..700&display=swap"
+    />
+
+    <link rel="stylesheet" href="./css/reset.css" />
+    <link rel="stylesheet" href="./css/variables.css" />
+    <link rel="stylesheet" href="./css/layout.css" />
+    <link rel="stylesheet" href="./css/components.css" />
+    <link rel="stylesheet" href="./css/animations.css" />
+
+    <script type="module" src="./js/app.js"></script>
+  </head>
+
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+
+    <div class="shell">
+      <header class="masthead">
+        <a class="wordmark" href="./" data-action="go-home">
+          <span>Word</span><span class="wordmark__race">Race</span>
+        </a>
+        <div class="row" id="masthead-slot"></div>
+      </header>
+
+      <main class="screens" id="screens">
+        <!-- ============ Home ============================================
+             The hero is the game played once, on loop: two inked letters and
+             the word that bridges them. It states both rules without a
+             tutorial, which is the most characteristic thing this game has. -->
+        <section class="screen" data-screen="home" hidden>
+          <div class="hero">
+            <p class="eyebrow">Two players · one letter each</p>
+            <h1 class="display">Start on mine.<br />End on yours.</h1>
+
+            <div class="hero__demo">
+              <div
+                class="standoff standoff--bridge standoff--idle"
+                id="hero-standoff"
+                aria-hidden="true"
+              >
+                <span class="bridge__ink bridge__ink--a"></span>
+                <span class="bridge__ink bridge__ink--b"></span>
+                <div class="standoff__slot">
+                  <div class="tile tile--a">
+                    <span class="tile__role">starts</span>
+                    <span class="tile__glyph" id="hero-letter-a">M</span>
+                  </div>
+                </div>
+                <div class="standoff__gap"></div>
+                <div class="standoff__slot">
+                  <div class="tile tile--b">
+                    <span class="tile__role">ends</span>
+                    <span class="tile__glyph" id="hero-letter-b">T</span>
+                  </div>
+                </div>
+              </div>
+              <p class="hero__word" id="hero-word" aria-hidden="true"></p>
+              <p class="sr-only">
+                Example: with the letters M and T, the word "moment" is valid because it starts
+                with M and ends with T.
+              </p>
+            </div>
+
+            <p class="lede">
+              Pick a letter in secret. On reveal, race to type a real English word that starts
+              with the first letter and ends with the second. Fastest valid word takes the round.
+            </p>
+
+            <div class="row">
+              <button class="btn btn--primary btn--hero" type="button" data-action="go-create">
+                Create a room
+              </button>
+              <button class="btn btn--sun" type="button" data-action="go-join">
+                Join with a code
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ Create ========================================== -->
+        <section class="screen" data-screen="create" hidden>
+          <div class="stack">
+            <button class="btn btn--quiet" type="button" data-action="go-home">← Back</button>
+            <div class="card card--tilt">
+              <h1 class="card__title">What should we call you?</h1>
+              <p class="note">Your opponent sees this name.</p>
+              <form class="stack stack--tight" data-form="create" novalidate>
+                <div class="field" style="margin-block-start: var(--space-4)">
+                  <label class="field__label" for="create-name">Display name</label>
+                  <input
+                    class="input"
+                    id="create-name"
+                    name="name"
+                    type="text"
+                    maxlength="14"
+                    autocomplete="nickname"
+                    enterkeyhint="go"
+                    data-autofocus
+                  />
+                  <p class="field__error" data-error aria-live="polite"></p>
+                </div>
+                <button class="btn btn--primary btn--block" type="submit">Create the room</button>
+              </form>
+            </div>
+            <p class="note">You'll get a four-digit code to share.</p>
+          </div>
+        </section>
+
+        <!-- ============ Join ============================================ -->
+        <section class="screen" data-screen="join" hidden>
+          <div class="stack">
+            <button class="btn btn--quiet" type="button" data-action="go-home">← Back</button>
+            <div class="card">
+              <h1 class="card__title">Join a room</h1>
+              <form class="stack stack--tight" data-form="join" novalidate>
+                <div class="field" style="margin-block-start: var(--space-4)">
+                  <label class="field__label" for="join-code">Room code</label>
+                  <input
+                    class="input input--code"
+                    id="join-code"
+                    name="code"
+                    type="text"
+                    inputmode="numeric"
+                    pattern="[0-9]*"
+                    maxlength="4"
+                    autocomplete="off"
+                    placeholder="0000"
+                  />
+                </div>
+                <div class="field">
+                  <label class="field__label" for="join-name">Display name</label>
+                  <input
+                    class="input"
+                    id="join-name"
+                    name="name"
+                    type="text"
+                    maxlength="14"
+                    autocomplete="nickname"
+                    enterkeyhint="go"
+                  />
+                </div>
+                <p class="field__error" data-error aria-live="polite"></p>
+                <button class="btn btn--primary btn--block" type="submit">Join the room</button>
+              </form>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ Lobby ==========================================
+             Markup below is representative. LobbyManager rewrites the code
+             digits, the player list, and the action row from game state. -->
+        <section class="screen" data-screen="lobby" hidden>
+          <div class="stack">
+            <div class="card card--halftone" style="text-align: center">
+              <p class="eyebrow">Room code</p>
+              <div class="code" id="lobby-code" style="margin-block: var(--space-3)">
+                <span class="code__digit">0</span>
+                <span class="code__digit">0</span>
+                <span class="code__digit">0</span>
+                <span class="code__digit">0</span>
+              </div>
+              <button class="btn btn--quiet" type="button" data-action="copy-invite">
+                Copy invite link
+              </button>
+            </div>
+
+            <ul class="stack stack--tight" id="lobby-players"></ul>
+
+            <div class="row" id="lobby-actions"></div>
+            <p class="note" id="lobby-hint" style="text-align: center"></p>
+          </div>
+        </section>
+
+        <!-- ============ Game ===========================================
+             RoundManager owns everything inside .board. Slots are filled by
+             JS so the same markup serves letter entry, reveal, and result. -->
+        <section class="screen" data-screen="game" hidden>
+          <div class="board">
+            <div class="stack stack--tight" id="scoreboard"></div>
+
+            <p class="eyebrow" id="phase-label">Waiting</p>
+
+            <div class="standoff standoff--bridge standoff--reveal" id="board-standoff">
+              <span class="bridge__ink bridge__ink--a"></span>
+              <span class="bridge__ink bridge__ink--b"></span>
+              <div class="standoff__slot" id="slot-a"></div>
+              <div class="standoff__gap"></div>
+              <div class="standoff__slot" id="slot-b"></div>
+            </div>
+
+            <div class="board__rule" id="board-rule"></div>
+
+            <form class="stack stack--tight" id="word-form" hidden>
+              <label class="sr-only" for="word-input">Your word</label>
+              <input
+                class="word-input"
+                id="word-input"
+                type="text"
+                maxlength="24"
+                autocomplete="off"
+                autocapitalize="characters"
+                spellcheck="false"
+                enterkeyhint="send"
+                placeholder="Type your word"
+              />
+              <button class="btn btn--primary btn--block" type="submit">Submit word</button>
+            </form>
+
+            <div class="timer" id="timer" hidden aria-hidden="true">
+              <div class="timer__fill" id="timer-fill"></div>
+            </div>
+
+            <div class="row" id="game-actions"></div>
+          </div>
+        </section>
+
+        <!-- ============ Error ========================================== -->
+        <section class="screen" data-screen="error" hidden>
+          <div class="stack">
+            <div class="card" style="text-align: center">
+              <p class="eyebrow" id="error-code">Disconnected</p>
+              <h1 class="headline" id="error-title" style="margin-block: var(--space-3)">
+                Something went wrong
+              </h1>
+              <p class="note" id="error-detail"></p>
+              <div class="row" id="error-actions" style="margin-block-start: var(--space-5)"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="colophon">
+        <span>Peer-to-peer. No account, no server, no scores kept anywhere but here.</span>
+      </footer>
+    </div>
+
+    <div class="toast-rail" id="toast-rail"></div>
+    <div id="overlay-root"></div>
+
+    <!-- Single assertive live region for round-critical announcements
+         (reveal, winner, draw) so the game is playable without sight. -->
+    <p class="sr-only" id="announcer" role="status" aria-live="assertive"></p>
+  </body>
+</html>
