@@ -40,8 +40,8 @@ export const GAME_MODE = Object.freeze({
 /** Seat counts each mode supports. */
 export const MODE_CAPACITY = Object.freeze({
   [GAME_MODE.DUEL]: { min: 2, max: 2 },
-  [GAME_MODE.CONTAINS]: { min: 3, max: 4 },
-  [GAME_MODE.ROUND_ROBIN]: { min: 2, max: 4 },
+  [GAME_MODE.CONTAINS]: { min: 2, max: 6 },
+  [GAME_MODE.ROUND_ROBIN]: { min: 3, max: 6 },
 });
 
 /* ---- Host-configurable settings ----------------------------------------
