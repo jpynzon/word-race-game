@@ -17,7 +17,7 @@ export const PEER_ID_PREFIX = "wordrace-v1-";
 export const MAX_ROOM_CODE_ATTEMPTS = 6;
 
 /** The largest room any mode allows. Seat arrays and the lobby size to this. */
-export const MAX_PLAYERS = 4;
+export const MAX_PLAYERS = 6;
 export const MAX_NAME_LENGTH = 14;
 
 /* ---- Game modes ---------------------------------------------------------
