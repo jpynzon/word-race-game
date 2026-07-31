@@ -485,7 +485,7 @@ It is static files. Anything that serves them works — GitHub Pages, Netlify, V
 Before you publicise the link:
 
 - **HTTPS.** WebRTC needs a secure context. `localhost` is exempt; a deployed HTTP origin is not.
-- **Replace `https://word-race.example/`** in `index.html` (canonical, `og:url`, both image URLs), `robots.txt` and `sitemap.xml` with your real domain.
+- **Replace `https://word-race.jpynzon.dev/`** in `index.html` (canonical, `og:url`, both image URLs), `robots.txt` and `sitemap.xml` with your real domain.
 - **Generate the raster social card.** `assets/og-image.svg` is the canonical artwork and is referenced by default so nothing is ever a dangling link, but Twitter/X and Facebook will not render SVG in a preview. Open `assets/make-og-raster.html`, click the button, drop the downloaded `og-image.jpg` into `assets/`, and point `og:image` / `twitter:image` at it with `og:image:type` set to `image/jpeg`.
 - **Serve `assets/wordlist.txt` with gzip** if you can. It is 302 KB raw and about 100 KB compressed. Most hosts do this automatically.
 

@@ -6,4 +6,4 @@ Allow: /
 # canonical entry point.
 Disallow: /play.html
 
-Sitemap: https://word-race.example/sitemap.xml
+Sitemap: https://word-race.jpynzon.dev/sitemap.xml
