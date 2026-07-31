@@ -46,7 +46,7 @@ Letter hunt · 3–4 players   the word must contain every letter, anywhere
 ## Playing it
 
 1. One player creates a room and gets a four-digit code.
-2. They share the code, or the invite link: `https://your-host/?room=4821`
+2. They share the code, or the invite link: `https://word-race.jpynzon.dev/?room=4821`
 3. Everyone else opens it, and the code is already filled in.
 4. The host picks the mode and rules. Everyone marks ready. The host starts.
 5. Each round: pick a secret letter → 3·2·1 → all letters flip up → race to type a word.
