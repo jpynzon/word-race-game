@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Playing — Word Race</title>
+
+    <!-- The app itself is stateful and per-session, so there is nothing here for
+         a search engine to index. The landing page carries the SEO. -->
+    <meta name="robots" content="noindex, follow" />
+    <meta name="description" content="Live Word Race match." />
+    <meta name="theme-color" content="#FFF3F7" />
+    <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400..800&family=Nunito:ital,wght@0,400..900;1,400..700&display=swap"
+    />
+
+    <link rel="stylesheet" href="./css/reset.css" />
+    <link rel="stylesheet" href="./css/variables.css" />
+    <link rel="stylesheet" href="./css/layout.css" />
+    <link rel="stylesheet" href="./css/components.css" />
+    <link rel="stylesheet" href="./css/animations.css" />
+
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <script type="module" src="./js/play.js"></script>
+  </head>
+
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+
+    <div class="shell">
+      <header class="masthead">
+        <a class="wordmark" href="./" data-action="go-home">
+          <span>Word</span><span class="wordmark__race">Race</span>
+        </a>
+        <div class="row" id="masthead-slot"></div>
+      </header>
+
+      <main class="screens" id="screens">
+        <!-- ============ Connecting ===================================== -->
+        <section class="screen" data-screen="connecting" hidden>
+          <div class="stack">
+            <div class="card" style="text-align: center">
+              <p class="eyebrow" id="connecting-label">Connecting</p>
+              <h1 class="headline" style="margin-block: var(--space-3)">
+                Setting up your room
+              </h1>
+              <p class="note" id="connecting-detail">
+                Trying a direct connection first, then a relay if your network blocks it.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ Lobby ========================================== -->
+        <section class="screen" data-screen="lobby" hidden>
+          <div class="stack">
+            <div class="card card--halftone" style="text-align: center">
+              <p class="eyebrow">Room code</p>
+              <div class="code" id="lobby-code" style="margin-block: var(--space-3)"></div>
+              <button class="btn btn--quiet" type="button" data-action="copy-invite">
+                Copy invite link
+              </button>
+            </div>
+
+            <ul class="stack stack--tight" id="lobby-players"></ul>
+
+            <div id="lobby-settings"></div>
+
+            <div class="row" id="lobby-actions"></div>
+            <p class="note" id="lobby-hint" style="text-align: center"></p>
+          </div>
+        </section>
+
+        <!-- ============ Game ==========================================
+             Order matters here. Everything needed to actually play — the
+             letters, the word field, the clock — comes first, so nothing a
+             player needs mid-race is below the fold. The scoreboard is
+             reference material and sits underneath. -->
+        <section class="screen" data-screen="game" hidden>
+          <div class="board">
+            <p class="eyebrow" id="phase-label">Waiting</p>
+
+            <div class="standoff standoff--bridge standoff--reveal" id="board-standoff">
+              <div class="standoff__rail">
+                <div class="bridge" id="board-bridge" aria-hidden="true"></div>
+                <div class="standoff__tiles" id="board-tiles"></div>
+              </div>
+            </div>
+
+            <div class="board__rule" id="board-rule"></div>
+
+            <form class="stack stack--tight" id="word-form" hidden>
+              <label class="sr-only" for="word-input">Your word</label>
+              <input
+                class="word-input"
+                id="word-input"
+                type="text"
+                maxlength="24"
+                autocomplete="off"
+                autocapitalize="characters"
+                spellcheck="false"
+                enterkeyhint="send"
+                placeholder="Type your word"
+              />
+              <button class="btn btn--primary btn--block" type="submit" id="word-submit">
+                Submit word
+              </button>
+            </form>
+
+            <div class="timer" id="timer" hidden aria-hidden="true">
+              <div class="timer__fill" id="timer-fill"></div>
+            </div>
+
+            <hr class="hairline" />
+
+            <div class="stack stack--tight" id="scoreboard"></div>
+
+            <div class="row" id="game-actions"></div>
+          </div>
+        </section>
+
+        <!-- ============ Error ========================================== -->
+        <section class="screen" data-screen="error" hidden>
+          <div class="stack">
+            <div class="card" style="text-align: center">
+              <p class="eyebrow" id="error-code">Disconnected</p>
+              <h1 class="headline" id="error-title" style="margin-block: var(--space-3)">
+                Something went wrong
+              </h1>
+              <p class="note" id="error-detail"></p>
+              <div class="row" id="error-actions" style="margin-block-start: var(--space-5)"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="colophon">
+        <span>Peer-to-peer, with a relay fallback. No account, no scores kept anywhere but here.</span>
+      </footer>
+    </div>
+
+    <div class="toast-rail" id="toast-rail"></div>
+    <div id="overlay-root"></div>
+
+    <p class="sr-only" id="announcer" role="status" aria-live="assertive"></p>
+  </body>
+</html>

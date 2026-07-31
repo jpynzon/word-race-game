@@ -361,7 +361,10 @@ All 26 letters stay available in both modes, and no round is ever unwinnable.
 ## Project layout
 
 ```
-index.html                   all screens; toggled with [hidden]
+index.html                   landing page: SEO, hero, create/join forms
+play.html                    the app: connecting, lobby, board, error
+sw.js                        offline cache (network-first for code)
+robots.txt  sitemap.xml  manifest.webmanifest
 
 css/
   reset.css                  reset + @layer order declaration
@@ -371,7 +374,8 @@ css/
   animations.css             keyframes + reduced-motion
 
 js/
-  app.js                     composition root — the only place that wires things
+  home.js                    landing page: identity and intent only, never connects
+  play.js                    app composition root — the only place that wires things
   constants.js               every tunable value in the game
   state.js                   the single store + selectors
   router.js                  invite links in, shareable URL out
@@ -409,6 +413,30 @@ assets/
   wordlist.txt               36,869 words
   favicon.svg
 ```
+
+### Why two documents
+
+The landing page is static and crawlable; the app is a stateful session. Splitting them lets the landing page carry the SEO without the app needing to be indexable.
+
+**The split is only safe in one direction.** A live WebRTC connection cannot survive a navigation, so the connection is opened *after* the last page load — `home.js` never connects, it only routes — and every in-game navigation stays inside `play.html`. Leaving mid-match triggers a `beforeunload` confirmation, because closing that tab ends the room.
+
+**Intent crosses the gap in `sessionStorage`, not the query string.** Static hosts rewrite URLs: `serve`'s clean-URLs turns `/play.html?host=1` into `/play` and silently drops the query, which broke the handoff entirely until it was moved into storage. The query string remains as a fallback, and the room code is also read from the `#/room/8440` hash so refreshing mid-match rejoins instead of dumping you on the landing page.
+
+Invite links point at the root (`/?room=8440`), never at `play.html` — a guest needs to give a name before a connection is worth opening, and the root path is not subject to filename rewriting.
+
+### Board layout
+
+Order on the game screen is deliberate: phase label, letter tiles, the rule, the word field, the clock — then a divider, then the scoreboard. Everything needed to *play* comes first so nothing is below the fold mid-race; the scoreboard is reference material.
+
+The word field takes focus the instant it appears, so you can type immediately. This is keyed off the hidden→visible transition rather than the round changing, because the round changes during letter entry while the field is still hidden — and focusing a hidden element silently does nothing. It is also focused synchronously rather than in `requestAnimationFrame`, which never fires in a backgrounded tab.
+
+Submitting shows **"Validating word…"** with `aria-busy` until the answer arrives, and a keyboard submit gets the same pressed animation a click does — pressing Enter otherwise fired the form without ever putting the button in `:active`, so it looked like nothing happened.
+
+### Service worker
+
+`sw.js` is **network-first for documents, modules and stylesheets**, cache-first only for `assets/` and fonts. The cache exists to make the game playable offline, not to decide which version you run.
+
+An earlier revision was cache-first for everything and precached a file that had since been deleted — so `addAll` rejected, the install failed, and whatever was already cached was served forever. If you ever see stale behaviour in development, check for a registered worker before suspecting the build.
 
 Conventions worth knowing before contributing:
 
@@ -454,9 +482,11 @@ It is static files. Anything that serves them works — GitHub Pages, Netlify, V
 # GitHub Pages: push, then enable Pages on the branch/folder.
 ```
 
-Two requirements:
+Before you publicise the link:
 
 - **HTTPS.** WebRTC needs a secure context. `localhost` is exempt; a deployed HTTP origin is not.
+- **Replace `https://word-race.example/`** in `index.html` (canonical, `og:url`, both image URLs), `robots.txt` and `sitemap.xml` with your real domain.
+- **Generate the raster social card.** `assets/og-image.svg` is the canonical artwork and is referenced by default so nothing is ever a dangling link, but Twitter/X and Facebook will not render SVG in a preview. Open `assets/make-og-raster.html`, click the button, drop the downloaded `og-image.jpg` into `assets/`, and point `og:image` / `twitter:image` at it with `og:image:type` set to `image/jpeg`.
 - **Serve `assets/wordlist.txt` with gzip** if you can. It is 302 KB raw and about 100 KB compressed. Most hosts do this automatically.
 
 No environment variables, no server-side anything.

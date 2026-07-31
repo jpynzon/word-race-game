@@ -100,11 +100,17 @@ export function createRouter() {
     /**
      * @param {string} roomCode
      * @returns {string} absolute, shareable invite URL
+     *
+     * Always points at the landing page, never at play.html, even when called
+     * from inside the app. A guest following an invite has to give a name before
+     * a connection is worth opening, and the landing page is where that happens.
      */
     inviteLink(roomCode) {
       const url = new URL(window.location.href);
       url.hash = "";
       url.search = `?room=${roomCode}`;
+      // Strip any filename, leaving the directory root.
+      url.pathname = url.pathname.replace(/[^/]*$/, "");
       return url.toString();
     },
 

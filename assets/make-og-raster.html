@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Generate og-image.jpg — Word Race</title>
+    <style>
+      body { font: 16px/1.5 system-ui, sans-serif; max-width: 44rem; margin: 3rem auto; padding: 0 1rem; }
+      img { max-width: 100%; border: 2px solid #2B1B3D; border-radius: 12px; margin-block: 1rem; }
+      code { background: #f2f2f2; padding: 0.1em 0.35em; border-radius: 4px; }
+      button { font: inherit; font-weight: 700; padding: 0.6em 1.2em; border-radius: 999px;
+               border: 2px solid #2B1B3D; background: #FFD23F; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <h1>Generate <code>og-image.jpg</code></h1>
+    <p>
+      <code>assets/og-image.svg</code> is the canonical social card, but Twitter/X and
+      Facebook will not render SVG in a link preview. This page rasterises the same
+      artwork to a 1200×630 JPEG using the site's real webfonts.
+    </p>
+    <ol>
+      <li>Click the button — the file downloads as <code>og-image.jpg</code>.</li>
+      <li>Move it into <code>assets/</code>.</li>
+      <li>
+        In <code>index.html</code>, point <code>og:image</code> and
+        <code>twitter:image</code> at <code>og-image.jpg</code> and set
+        <code>og:image:type</code> to <code>image/jpeg</code>.
+      </li>
+    </ol>
+
+    <button id="go" type="button">Render and download</button>
+    <div id="out"></div>
+
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400..800&family=Nunito:wght@400..900&display=swap"
+    />
+    <script>
+      document.getElementById("go").addEventListener("click", async () => {
+        await document.fonts.load('800 150px "Baloo 2"');
+        await document.fonts.load('800 32px "Nunito"');
+        await document.fonts.ready;
+
+        const W = 1200, H = 630;
+        const c = document.createElement("canvas");
+        c.width = W; c.height = H;
+        const x = c.getContext("2d");
+        const rr = (px, py, w, h, r) => {
+          x.beginPath(); x.moveTo(px + r, py);
+          x.arcTo(px + w, py, px + w, py + h, r);
+          x.arcTo(px + w, py + h, px, py + h, r);
+          x.arcTo(px, py + h, px, py, r);
+          x.arcTo(px, py, px + w, py, r);
+          x.closePath();
+        };
+
+        x.fillStyle = "#FFF3F7"; x.fillRect(0, 0, W, H);
+
+        const cx = W / 2, bandY = 258, bandH = 34;
+        x.globalCompositeOperation = "multiply";
+        x.fillStyle = "#FF4D8D"; rr(cx - 235, bandY, 250, bandH, 8); x.fill();
+        x.fillStyle = "#3D5AFF"; rr(cx - 15, bandY, 250, bandH, 8); x.fill();
+        x.globalCompositeOperation = "source-over";
+
+        const tile = (px, py, ink, glyph, role, rot) => {
+          x.save(); x.translate(px, py); x.rotate(rot);
+          x.fillStyle = ink; rr(-95, -114, 190, 228, 30); x.fill();
+          x.fillStyle = "#FFF3F7"; rr(-79, -98, 158, 196, 22); x.fill();
+          x.strokeStyle = "#2B1B3D"; x.lineWidth = 6; rr(-95, -114, 190, 228, 30); x.stroke();
+          x.fillStyle = "#2B1B3D"; x.textAlign = "center";
+          x.font = '800 40px "Nunito", sans-serif';
+          x.globalAlpha = 0.55; x.fillText(role.toUpperCase(), 0, -52); x.globalAlpha = 1;
+          x.font = '800 150px "Baloo 2", sans-serif';
+          x.textBaseline = "middle"; x.fillText(glyph, 0, 26);
+          x.restore();
+        };
+        tile(cx - 200, bandY + 17, "#FF4D8D", "M", "starts", -0.045);
+        tile(cx + 200, bandY + 17, "#3D5AFF", "T", "ends", 0.045);
+
+        x.textAlign = "center"; x.textBaseline = "alphabetic";
+        x.font = '800 76px "Baloo 2", sans-serif';
+        x.fillStyle = "#2B1B3D"; x.fillText("Word", cx - 92, 122);
+        x.lineWidth = 7; x.strokeStyle = "#2B1B3D"; x.fillStyle = "#FF4D8D";
+        x.strokeText("Race", cx + 94, 122); x.fillText("Race", cx + 94, 122);
+
+        x.font = '800 104px "Baloo 2", sans-serif';
+        x.lineWidth = 12; x.strokeStyle = "#7B2BB5";
+        x.strokeText("MOMENT", cx, 508);
+        x.fillStyle = "#FFF3F7"; x.fillText("MOMENT", cx, 508);
+
+        x.font = '800 32px "Nunito", sans-serif';
+        x.fillStyle = "rgba(43,27,61,0.66)";
+        x.fillText("One secret letter each · race to a word · 2–4 players", cx, 572);
+
+        const url = c.toDataURL("image/jpeg", 0.9);
+        document.getElementById("out").innerHTML = `<img src="${url}" alt="Preview">`;
+        const a = document.createElement("a");
+        a.href = url; a.download = "og-image.jpg"; a.click();
+      });
+    </script>
+  </body>
+</html>

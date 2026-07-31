@@ -1,19 +1,21 @@
 {
-  "name": "Word Race",
+  "name": "Word Race — Multiplayer Word Game",
   "short_name": "Word Race",
-  "description": "A real-time two-player word duel that runs entirely in the browser.",
+  "description": "Everyone picks one secret letter, then races to type a real English word that fits. 2–4 players, no sign-up.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#FBF3F6",
-  "theme_color": "#FBF3F6",
+  "background_color": "#FFF3F7",
+  "theme_color": "#FFF3F7",
+  "categories": ["games", "entertainment"],
+  "lang": "en",
   "icons": [
     {
       "src": "./assets/favicon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any"
+      "purpose": "any maskable"
     }
   ]
 }

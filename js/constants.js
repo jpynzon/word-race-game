@@ -213,13 +213,23 @@ export const CONFETTI_COUNT = 34;
    so a typo is a runtime error at the source instead of a silent no-op. */
 
 export const SCREEN = Object.freeze({
+  /* index.html */
   HOME: "home",
   CREATE: "create",
   JOIN: "join",
+  /* play.html */
+  CONNECTING: "connecting",
   LOBBY: "lobby",
   GAME: "game",
   ERROR: "error",
 });
+
+/**
+ * How long the submit button stays in its "validating" state before giving up on
+ * hearing back. A dictionary lookup plus a relay round trip is the worst case;
+ * past that, something went wrong and a stuck button is worse than a wrong label.
+ */
+export const SUBMIT_PENDING_TIMEOUT_MS = 8_000;
 
 export const ROLE = Object.freeze({
   HOST: "host",

@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630"
+     role="img" aria-label="Word Race — two letter tiles, M and T, bridged by the word MOMENT">
+  <!-- Social card. Same composition as the hero: two inked tiles whose colour
+       bands overlap into the overprint, and the word that bridges them.
+
+       Text is drawn as paths-free <text> with a web-safe stack, because this file
+       is rendered by crawlers and preview bots that will not load webfonts. -->
+  <rect width="1200" height="630" fill="#FFF3F7"/>
+
+  <!-- The overprint bridge: pink and blue bands multiplying where they meet. -->
+  <g style="mix-blend-mode: multiply">
+    <rect x="365" y="275" width="250" height="34" rx="8" fill="#FF4D8D"/>
+    <rect x="585" y="275" width="250" height="34" rx="8" fill="#3D5AFF"/>
+  </g>
+
+  <!-- Tile A: pink ring, dark glyph knocked out of paper. -->
+  <g transform="translate(400 292) rotate(-2.6)">
+    <rect x="-95" y="-114" width="190" height="228" rx="30" fill="#FF4D8D"
+          stroke="#2B1B3D" stroke-width="6"/>
+    <rect x="-79" y="-98" width="158" height="196" rx="22" fill="#FFF3F7"/>
+    <text x="0" y="-52" text-anchor="middle" fill="#2B1B3D" fill-opacity="0.55"
+          font-family="Verdana,Geneva,sans-serif" font-size="30" font-weight="700"
+          letter-spacing="3">STARTS</text>
+    <text x="0" y="72" text-anchor="middle" fill="#2B1B3D"
+          font-family="Trebuchet MS,Verdana,sans-serif" font-size="150" font-weight="700">M</text>
+  </g>
+
+  <!-- Tile B: blue ring. -->
+  <g transform="translate(800 292) rotate(2.6)">
+    <rect x="-95" y="-114" width="190" height="228" rx="30" fill="#3D5AFF"
+          stroke="#2B1B3D" stroke-width="6"/>
+    <rect x="-79" y="-98" width="158" height="196" rx="22" fill="#FFF3F7"/>
+    <text x="0" y="-52" text-anchor="middle" fill="#2B1B3D" fill-opacity="0.55"
+          font-family="Verdana,Geneva,sans-serif" font-size="30" font-weight="700"
+          letter-spacing="3">ENDS</text>
+    <text x="0" y="72" text-anchor="middle" fill="#2B1B3D"
+          font-family="Trebuchet MS,Verdana,sans-serif" font-size="150" font-weight="700">T</text>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="600" y="122" text-anchor="middle"
+        font-family="Trebuchet MS,Verdana,sans-serif" font-size="76" font-weight="700">
+    <tspan fill="#2B1B3D">Word</tspan><tspan fill="#FF4D8D" stroke="#2B1B3D"
+      stroke-width="6" paint-order="stroke fill" dx="10">Race</tspan>
+  </text>
+
+  <!-- The bridging word, paper-filled with an overprint outline. -->
+  <text x="600" y="508" text-anchor="middle" fill="#FFF3F7" stroke="#7B2BB5"
+        stroke-width="12" paint-order="stroke fill" letter-spacing="6"
+        font-family="Trebuchet MS,Verdana,sans-serif" font-size="104" font-weight="700">MOMENT</text>
+
+  <text x="600" y="574" text-anchor="middle" fill="#2B1B3D" fill-opacity="0.66"
+        font-family="Verdana,Geneva,sans-serif" font-size="30" font-weight="700">
+    One secret letter each · race to a word · 2–4 players
+  </text>
+</svg>

@@ -189,6 +189,14 @@
     animation-delay: var(--delay, 0ms);
   }
 
+  /* The submit button while a word is being validated. Motion is the point: a
+     static "Validating word…" could still be a frozen page. */
+  @keyframes busy-stripes {
+    to {
+      background-position: 32px 0;
+    }
+  }
+
   /* A pip landing as a spectator watches someone type. Small and quick — it
      fires per character, so anything showier would be noise. */
   @keyframes pip-in {

@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+
+# The app is a live per-session match with nothing to index, and every URL under
+# it carries a room code. Kept out of results so the landing page is the single
+# canonical entry point.
+Disallow: /play.html
+
+Sitemap: https://word-race.example/sitemap.xml

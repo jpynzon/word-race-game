@@ -133,6 +133,30 @@
     transform: rotate(var(--btn-tilt));
   }
 
+  /* Replays the pressed look for a submit that came from the keyboard. Enter
+     fires the form without ever putting the button in :active, so without this a
+     keyboard submit gets no tactile confirmation at all. */
+  .btn.is-pressed:not(:disabled),
+  .btn.is-pressed:disabled {
+    transform: rotate(var(--btn-tilt)) translate(3px, 4px) scale(0.97);
+    box-shadow: 0 0 0 var(--ink);
+    transition-duration: var(--dur-fast);
+  }
+
+  /* Validating: still clearly a button, visibly not idle. Kept at full opacity
+     unlike a normal disabled button — it is working, not unavailable. */
+  .btn[aria-busy="true"] {
+    opacity: 1;
+    cursor: progress;
+    background-image: repeating-linear-gradient(
+      -45deg,
+      rgb(255 255 255 / 16%) 0 8px,
+      transparent 8px 16px
+    );
+    background-size: 200% 100%;
+    animation: busy-stripes 900ms linear infinite;
+  }
+
   .btn--primary {
     --btn-face: var(--ink);
     --btn-ink: var(--paper);
@@ -768,6 +792,61 @@
     border: var(--stroke) solid var(--ink);
     border-radius: var(--radius-lg);
     box-shadow: var(--offset-lg);
+  }
+
+  /* ==== Landing page prose ==============================================
+     Real content below the hero: useful to a first-time player, and the
+     substance a search engine needs to rank the page for anything beyond the
+     brand name. */
+  .prose {
+    display: grid;
+    gap: var(--space-4);
+    inline-size: 100%;
+    max-inline-size: 44rem;
+    margin-block-start: var(--space-7);
+    padding-block-start: var(--space-6);
+    border-block-start: var(--stroke-thin) dashed var(--ink-faint);
+    text-align: start;
+  }
+
+  .prose > .headline {
+    margin-block-start: var(--space-3);
+  }
+
+  .prose > .headline:first-child {
+    margin-block-start: 0;
+  }
+
+  .steps {
+    display: grid;
+    gap: var(--space-3);
+  }
+
+  @media (width >= 44rem) {
+    .steps {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  .steps__item {
+    padding: var(--space-4);
+    background-color: var(--paper);
+    border: var(--stroke-thin) solid var(--ink);
+    border-radius: var(--radius-md);
+    box-shadow: var(--offset-sm);
+  }
+
+  /* Alternating tilt, so a row of cards reads as placed by hand. */
+  .steps__item:nth-child(odd) {
+    transform: rotate(var(--tilt-nudge));
+  }
+
+  .steps__title {
+    font-family: var(--font-display);
+    font-size: var(--text-lg);
+    font-weight: 700;
+    letter-spacing: var(--tracking-tight);
+    margin-block-end: var(--space-1);
   }
 
   /* ==== Spectator feed ==================================================

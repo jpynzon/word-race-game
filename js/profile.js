@@ -31,6 +31,7 @@ import { MAX_NAME_LENGTH } from "./constants.js";
 
 const PROFILE_KEY = "wordrace.profile";
 const TAB_ID_KEY = "wordrace.tabPlayerId";
+const INTENT_KEY = "wordrace.intent";
 
 /** In-memory fallback when neither storage is usable. */
 let memoryProfile = null;
@@ -166,6 +167,44 @@ export function createProfileStore() {
         /* not fatal */
       }
       writeDurable({ ...readDurable(), playerId: assignedId });
+    },
+
+    /**
+     * Records what the player wants to do next, for the landing page to hand to
+     * the app across a document navigation.
+     *
+     * Deliberately not a query string. Static hosts rewrite URLs: `serve`'s
+     * clean-URLs redirects `/play.html?host=1` to `/play` and drops the query
+     * entirely, and other hosts have their own opinions. sessionStorage survives
+     * a same-tab navigation untouched, and it keeps `?host=1` out of the address
+     * bar as a bonus.
+     *
+     * @param {{host?: boolean, room?: string}} intent
+     */
+    setIntent(intent) {
+      try {
+        session?.setItem(INTENT_KEY, JSON.stringify(intent));
+      } catch {
+        /* the query-string fallback still covers this */
+      }
+    },
+
+    /**
+     * Reads and clears the pending intent, so a refresh does not silently
+     * re-create a room the player already left.
+     *
+     * @returns {{host?: boolean, room?: string}|null}
+     */
+    takeIntent() {
+      try {
+        const raw = session?.getItem(INTENT_KEY);
+        if (!raw) return null;
+        session?.removeItem(INTENT_KEY);
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" ? parsed : null;
+      } catch {
+        return null;
+      }
     },
 
     /** Forgets everything. Not wired to any UI yet; here for a "not me" control. */

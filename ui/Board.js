@@ -1,4 +1,12 @@
-import { CONFETTI_COUNT, GAME_MODE, PHASE, ROLE, TIMER_CRITICAL_FRACTION, TIMER_WARN_FRACTION } from "../js/constants.js";
+import {
+  CONFETTI_COUNT,
+  GAME_MODE,
+  PHASE,
+  ROLE,
+  SUBMIT_PENDING_TIMEOUT_MS,
+  TIMER_CRITICAL_FRACTION,
+  TIMER_WARN_FRACTION,
+} from "../js/constants.js";
 import { createDeadlineTimer } from "../game/Timer.js";
 import { createScoreboard } from "./Scoreboard.js";
 import { createCountdownView } from "./Countdown.js";
@@ -37,6 +45,20 @@ export function createBoard({ dom, announcer, toaster, actions }) {
 
   /** The state from the most recent render, so the feed can refresh alone. */
   let lastState = null;
+
+  /** Guards the submit button's pending state. @see beginSubmitting */
+  let pendingTimer = null;
+  const SUBMIT_LABEL = "Submit word";
+
+  /** Releases the submit button. Safe to call when it was never pending. */
+  function releaseSubmit() {
+    clearTimeout(pendingTimer);
+    pendingTimer = null;
+    if (!dom.wordSubmit) return;
+    dom.wordSubmit.disabled = false;
+    dom.wordSubmit.textContent = SUBMIT_LABEL;
+    dom.wordSubmit.removeAttribute("aria-busy");
+  }
 
   /* ---- Small builders -------------------------------------------------- */
 
@@ -356,6 +378,8 @@ export function createBoard({ dom, announcer, toaster, actions }) {
     // An observer sees the race but has nothing to type into. The host enforces
     // this too; hiding the form is the courtesy, not the guard.
     const racing = match.phase === PHASE.RACE && !isObserver(state);
+    const wasRacing = dom.wordForm.hidden === false;
+
     dom.wordForm.hidden = !racing;
     dom.wordInput.disabled = !racing;
 
@@ -363,12 +387,34 @@ export function createBoard({ dom, announcer, toaster, actions }) {
       dom.wordInput.value = "";
       return;
     }
+
     // A new round means a clean field, but re-renders inside a round must not
     // wipe what the player is mid-way through typing.
     if (lastRoundId !== match.roundId) {
       dom.wordInput.value = "";
       dom.wordInput.classList.remove("is-rejected", "is-accepted");
-      requestAnimationFrame(() => dom.wordInput.focus({ preventScroll: true }));
+    }
+
+    /* Focus the moment the field appears, not merely when the round changes.
+       The round changes during letter entry, while this field is still hidden —
+       and focusing a hidden element silently does nothing, so the player used to
+       arrive at a live race with no cursor and had to click before typing.
+       Keying off the hidden→visible transition is what makes it reliable, and it
+       also raises the keyboard on a phone exactly when it is wanted.
+
+       Focused synchronously: the form was unhidden a few lines above, so the
+       element is already focusable. An earlier version deferred this to
+       requestAnimationFrame, which never fires while a tab is in the background —
+       so a player returning to a running race found no cursor at all. The
+       timeout is a second chance for browsers that ignore focus mid-layout. */
+    if (!wasRacing) {
+      const grabFocus = () => {
+        if (dom.wordForm.hidden || dom.wordInput.disabled) return;
+        if (document.activeElement === dom.wordInput) return;
+        dom.wordInput.focus({ preventScroll: true });
+      };
+      grabFocus();
+      setTimeout(grabFocus, 0);
     }
   }
 
@@ -513,6 +559,11 @@ export function createBoard({ dom, announcer, toaster, actions }) {
       // Activity is per-round; a new deal starts everyone from silence.
       if (match.roundId !== lastRoundId) activity.clear();
 
+      // The round ending is also an answer — a win, a draw, someone else got
+      // there first — so the button is released on any of them, not only on a
+      // rejection addressed to us.
+      if (match.phase !== PHASE.RACE || match.roundId !== lastRoundId) releaseSubmit();
+
       // The countdown is an overlay driven by the deadline in the snapshot, so
       // every screen runs it off its own clock from the same target.
       if (match.phase === PHASE.COUNTDOWN && match.countdownEndsAt) {
@@ -581,6 +632,35 @@ export function createBoard({ dom, announcer, toaster, actions }) {
       const strip = dom.rule.querySelector(".feed");
       if (strip && lastState) strip.replaceWith(renderSpectatorFeed(lastState));
     },
+
+    /**
+     * Puts the submit button into its validating state.
+     *
+     * Two problems being solved at once. First, a submitted word has to travel to
+     * the host, wait behind the submission queue, and clear a dictionary lookup —
+     * easily a second, and on a relay rather more. With no feedback that reads as
+     * a button that did nothing, and the player presses it again.
+     *
+     * Second, pressing Enter fires the form's submit without ever putting the
+     * button in `:active`, so a keyboard submit had no visual response at all.
+     * Adding the pressed class gives Enter exactly the same tactile confirmation
+     * the mouse already got.
+     */
+    beginSubmitting() {
+      if (!dom.wordSubmit) return;
+      dom.wordSubmit.classList.add("is-pressed");
+      setTimeout(() => dom.wordSubmit.classList.remove("is-pressed"), 160);
+
+      dom.wordSubmit.disabled = true;
+      dom.wordSubmit.textContent = "Validating word…";
+      dom.wordSubmit.setAttribute("aria-busy", "true");
+
+      // A stuck button is worse than a wrong label, so it always releases.
+      clearTimeout(pendingTimer);
+      pendingTimer = setTimeout(releaseSubmit, SUBMIT_PENDING_TIMEOUT_MS);
+    },
+
+    endSubmitting: releaseSubmit,
 
     /** Feedback on the local player's own rejected word. */
     rejectWord(message) {
