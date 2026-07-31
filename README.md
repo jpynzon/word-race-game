@@ -171,6 +171,44 @@ The room code *is* the network address. The host claims the peer id `wordrace-v1
 
 ---
 
+## Connection paths: direct first, relay if not
+
+Direct WebRTC already works across the internet — the room code is a global peer id, so a friend on the other side of the world connects fine. What breaks is *restrictive networks*: symmetric NAT, and corporate or school firewalls that refuse peer-to-peer outright.
+
+So there are two paths, and the host opens **both at once**:
+
+| Path | Carrier | Latency (measured) | Works through |
+| --- | --- | --- | --- |
+| `direct` | WebRTC data channel | ~0–50ms | ordinary NAT |
+| `relay` | MQTT over WSS, public broker | ~440ms | anything that allows HTTPS |
+
+A guest tries direct first and falls back, so a good network still gets the fast path and nobody pays for the fallback existing.
+
+**Why the host must listen on both, rather than falling back like a guest.** The obvious design is a chain: try WebRTC, use the relay if it fails. That is broken for the host. Picture a host on a fine network and a guest behind a strict firewall — the host opens WebRTC, succeeds, and stops listening. The guest fails WebRTC, falls back to the relay, and finds nobody there. They never meet, and it surfaces as "no such room". So the two roles are deliberately asymmetric: **hosts fan out, guests fall back.**
+
+A host can therefore serve one player directly and another through the relay at the same time. Every peer key is branded with its transport (`direct:abc`, `relay:r-9f2`) because `NetworkClient` keys per-peer dedupe, clock offset and heartbeat by peer key — two transports handing out colliding ids would cross two players' wires.
+
+Verified with three tabs, WebRTC deliberately broken on one of them:
+
+- Host came up on `["direct", "relay"]`
+- The blocked guest fell back and joined in 7.4s — `bestRttMs: 438`, zero dropped messages
+- A second guest with WebRTC intact took the fast path — `bestRttMs: 1`
+- Host held both peers simultaneously (`relay:r-52d3ad93` and `direct:d699c8ad…`)
+- Round robin then paired the **relayed** player against the **direct** one, and the relayed player *won the race* on a 438ms link — the offset-corrected submission ordering does its job across transports
+- State stayed byte-identical on the relayed guest
+
+Relayed players get a `Relay` badge in the player list. Direct is unlabelled, being the unremarkable default.
+
+**Two honest caveats about the free relay.**
+
+*It is a public broker.* Anyone who subscribed to the topic could read the traffic. Committed letters never travel before the reveal — they stay in the host's memory — so what is exposed is names, scores and already-revealed letters. Low stakes for a word game, but real. Point `RELAY_BROKER_URLS` at your own broker to close it.
+
+*No SLA.* These are community brokers. A word game sends a few KB per round so the load is negligible, but they can go down. Three are listed and tried in order.
+
+**Prefer relayed WebRTC instead?** Fill in `TURN_SERVERS` and ICE will use it automatically — it prefers a direct route on its own and only falls back to a relay candidate when it must. That path stays empty by default because every TURN provider needs credentials, and requiring an account would break the zero-setup promise the MQTT relay keeps.
+
+---
+
 ## Why PeerJS, and what it costs
 
 The brief was "frontend only", but real-time multiplayer needs networking. Rather than pretend otherwise, here is the actual trade space:
@@ -178,6 +216,7 @@ The brief was "frontend only", but real-time multiplayer needs networking. Rathe
 | Option | Backend | Setup | Latency | Survives host leaving |
 | --- | --- | --- | --- | --- |
 | **PeerJS / WebRTC** ✅ | none | none | best (peer-to-peer) | **no** |
+| **+ MQTT relay fallback** ✅ | none | none | ~440ms | no |
 | Firebase Realtime DB | managed | project + config keys | datacenter round-trip | yes |
 | Supabase Realtime | managed | account + anon keys | datacenter round-trip | yes |
 | Ably / Pusher | managed | paid tier + API keys | datacenter round-trip | yes |
@@ -187,7 +226,7 @@ PeerJS wins on the brief's own terms — zero backend, zero signup, zero keys, a
 **It costs two real things, both handled explicitly rather than hidden:**
 
 1. **The host is the server.** Close the host's tab and the room ends. The guest gets an honest "The host left the game" screen explaining why, with a way out — not a frozen board.
-2. **No TURN server.** The free broker handles signalling only. On most networks the peers connect directly; on restrictive ones (symmetric NAT, strict corporate or school firewalls) they cannot. That case is detected by timeout and reported as *"This network won't allow a direct connection"* with a suggestion to try a hotspot — deliberately distinguished from "no such room", because they need different fixes.
+2. **Restrictive networks cannot do WebRTC at all.** The free broker handles signalling only, with no TURN. That used to be a dead end; it now falls back to the MQTT relay described above, so those players still get in — just with more latency and a `Relay` badge.
 
 Both limitations are contained by keeping PeerJS in exactly one file behind a four-method interface:
 
@@ -198,7 +237,9 @@ send(object)
 close()
 ```
 
-`net/PeerTransport.js` is the only file in the project that knows PeerJS exists. Swapping to Firebase means writing one more file with those four methods and changing a single line in `GameManager`. Nothing above that layer mentions peers, ICE, or data channels.
+`net/PeerTransport.js` is the only file that knows PeerJS exists, and `net/RelayTransport.js` the only one that knows about MQTT. `net/MultiTransport.js` runs them as one. Nothing above that layer mentions peers, ICE, brokers or topics.
+
+That interface is the reason the relay could be added without touching a line of game logic — `RelayTransport` was written against the same four methods and dropped straight in. A Firebase or Ably transport would be one more file and one more entry in the transport plan.
 
 ---
 
@@ -352,7 +393,9 @@ net/
   Protocol.js                wire format and message types
   Events.js                  inbound validation + dedupe
   NetworkClient.js           sequencing, heartbeat, clock offset
+  MultiTransport.js          runs both paths as one; brands peer keys
   PeerTransport.js           the only file that knows PeerJS exists
+  RelayTransport.js          the only file that knows MQTT exists
 
 ui/
   Screen.js  Board.js  Scoreboard.js  Countdown.js
@@ -439,20 +482,24 @@ Everything lives in `js/constants.js`.
 | `HELLO_TIMEOUT_MS` | `10_000` | Time to identify before the seat is released |
 | `MERRIAM_WEBSTER_API_KEY` | `""` | Set it to promote Merriam-Webster to primary |
 
-**Adding a TURN server** for restrictive networks — in `net/PeerTransport.js`, pass an ICE config to the `Peer` constructor:
+**Connection paths:**
+
+| Constant | Default | Meaning |
+| --- | --- | --- |
+| `ICE_SERVERS` | 3 public STUN | How a peer learns its own public address |
+| `TURN_SERVERS` | `[]` | Fill in to prefer relayed WebRTC; ICE uses it only when needed |
+| `RELAY_BROKER_URLS` | 3 public MQTT/WSS | Tried in order. Point at your own broker for privacy |
+| `RELAY_TOPIC_PREFIX` | `wordrace/v1` | Topic namespace |
+
+**Adding a TURN server** — just fill in `TURN_SERVERS`; nothing else changes.
 
 ```js
-new PeerCtor(id, {
-  config: {
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "turn:your-turn-host:3478", username: "user", credential: "pass" },
-    ],
-  },
-});
+export const TURN_SERVERS = Object.freeze([
+  { urls: "turn:your-host:3478", username: "user", credential: "pass" },
+]);
 ```
 
-**Swapping the transport** — write `net/FirebaseTransport.js` implementing `hostRoom`, `joinRoom`, `send`, `close` (plus the optional `dropConnection` and `isConnected`), then change the `createTransport` default in `net/NetworkClient.js`. No game logic changes.
+**Adding another transport** — write a file implementing `hostRoom`, `joinRoom`, `send`, `sendTo`, `close` (plus optional `isConnected`, `peerKeys`, `dropConnection`), then add it to the `plan` array in `net/MultiTransport.js`. Hosts will start listening on it and guests will fall back to it, with no game logic changes.
 
 ---
 
@@ -484,7 +531,7 @@ What was verified end to end: room creation on the public broker, join by code a
 ## Known limitations
 
 - **The host is the server.** Closing the host's tab ends the room. Rooms are not host-independent.
-- **No TURN server**, so a minority of restrictive networks cannot connect at all. Detected and explained, not silently retried.
+- **The relay depends on public community brokers** — no SLA, and no privacy (see the connection-paths section). Configurable.
 - **Four players maximum.** The authority model extends further, but the board and scoreboard are built for four seats.
 - **Nobody can join a match already in progress** — the rule was built from the letters of whoever was seated at the deal. Late arrivals are refused until the room returns to the lobby. (Round robin has observers, but they are seated players waiting their turn, not drop-in spectators.)
 - **Round robin has no standings view.** Scores accumulate correctly, but there is no cross-table showing who beat whom.

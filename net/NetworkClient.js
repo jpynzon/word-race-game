@@ -5,7 +5,7 @@ import {
   ROLE,
 } from "../js/constants.js";
 import { createDedupe, validateMessage } from "./Events.js";
-import { createPeerTransport } from "./PeerTransport.js";
+import { createMultiTransport } from "./MultiTransport.js";
 import { envelope, MSG } from "./Protocol.js";
 
 /**
@@ -42,7 +42,7 @@ import { envelope, MSG } from "./Protocol.js";
 export function createNetworkClient({
   role,
   maxPeers = () => 1,
-  createTransport = createPeerTransport,
+  createTransport = createMultiTransport,
 }) {
   /** @type {Map<string, Set<Function>>} */
   const handlers = new Map();
@@ -315,6 +315,19 @@ export function createNetworkClient({
       return transport.peerKeys();
     },
 
+    /** @returns {string[]} which connection paths this room is reachable on */
+    modes() {
+      return transport.modes?.() ?? [];
+    },
+
+    /**
+     * @param {string} peerKey
+     * @returns {string} the connection path this particular peer is using
+     */
+    modeFor(peerKey) {
+      return transport.modeFor?.(peerKey) ?? "";
+    },
+
     /**
      * Drops one peer link, or all, while keeping the room open.
      * @param {string} [peerKey]
@@ -334,6 +347,7 @@ export function createNetworkClient({
       return {
         role,
         outboundSeq,
+        modes: transport.modes?.() ?? [],
         peerCount: transport.peerKeys().length,
         peers: Object.fromEntries(
           [...peers].map(([key, p]) => [

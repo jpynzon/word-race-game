@@ -654,6 +654,11 @@
     background-color: var(--ink-mint);
   }
 
+  .badge--relay {
+    background-color: var(--ink-blue);
+    color: var(--paper);
+  }
+
   /* The observer banner. Dashed like a cut line, because you are outside the
      round looking in. */
   .board__watching {

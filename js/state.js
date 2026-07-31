@@ -28,6 +28,14 @@ export function createInitialState() {
     latencyMs: null,
 
     /**
+     * Which connection paths this room is reachable on — a host normally has
+     * both `direct` and `relay` open at once. Local, not part of the snapshot:
+     * every player's path is their own.
+     * @type {string[]}
+     */
+    transportModes: [],
+
+    /**
      * @type {Record<string, {
      *   id: string, name: string, role: string,
      *   connected: boolean, ready: boolean

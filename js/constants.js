@@ -88,6 +88,64 @@ export const TIMER_CRITICAL_FRACTION = 0.2;
  *  room does not exist. */
 export const CONNECT_TIMEOUT_MS = 12_000;
 
+/* ---- Connection paths ---------------------------------------------------
+   Direct WebRTC is the fast path and the default. Some networks — symmetric
+   NAT, corporate and school firewalls — will not permit it at all, so there is
+   a relay fallback that goes over plain WSS on a standard port.
+
+   The host listens on BOTH at once. A fallback chain alone would not work: if
+   the host were on WebRTC and a guest could only reach the relay, they would
+   never meet. Guests try direct first and fall back. */
+
+export const TRANSPORT = Object.freeze({
+  /** WebRTC, peers talking straight to each other. Lowest latency. */
+  DIRECT: "direct",
+  /** Messages relayed through a public broker over WSS. Works almost anywhere. */
+  RELAY: "relay",
+});
+
+/** STUN lets a peer discover its own public address. Free, no account. */
+export const ICE_SERVERS = Object.freeze([
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+  { urls: "stun:stun.cloudflare.com:3478" },
+]);
+
+/**
+ * TURN relays the media/data itself and is what rescues the hardest networks
+ * while staying on WebRTC. Empty by default because every TURN provider needs
+ * credentials, and requiring an account would break this game's zero-setup
+ * promise — the MQTT relay below covers the same cases without one.
+ *
+ * Fill this in to prefer relayed WebRTC over the message relay:
+ *   { urls: "turn:host:3478", username: "user", credential: "pass" }
+ */
+export const TURN_SERVERS = Object.freeze([]);
+
+/**
+ * Public MQTT-over-WSS brokers, tried in order. Port 443/8084 WSS gets through
+ * effectively any firewall that allows normal HTTPS.
+ *
+ * These are open community brokers: no signup, no keys, and no privacy. See the
+ * README — a word game's traffic is low-stakes, and pointing this at your own
+ * broker closes the gap.
+ */
+export const RELAY_BROKER_URLS = Object.freeze([
+  "wss://broker.emqx.io:8084/mqtt",
+  "wss://broker.hivemq.com:8884/mqtt",
+  "wss://test.mosquitto.org:8081/mqtt",
+]);
+
+export const RELAY_TOPIC_PREFIX = "wordrace/v1";
+export const MQTT_CLIENT_URL = "https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js";
+
+/** How long a guest waits for the host's presence message before giving up. */
+export const RELAY_PRESENCE_TIMEOUT_MS = 6_000;
+/** How long a host waits to see whether a code is already claimed on the relay. */
+export const RELAY_CLAIM_WAIT_MS = 1_500;
+/** Host re-announces presence this often, so a late guest still finds the room. */
+export const RELAY_PRESENCE_INTERVAL_MS = 4_000;
+
 /** How long the host holds a disconnected player's seat open before releasing it. */
 export const RECONNECT_GRACE_MS = 20_000;
 

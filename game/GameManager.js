@@ -6,6 +6,7 @@ import {
   REJECTION,
   ROLE,
   SCREEN,
+  TRANSPORT,
 } from "../js/constants.js";
 import { describeFailure } from "../js/messages.js";
 import { createInitialMatch, createInitialState } from "../js/state.js";
@@ -228,8 +229,9 @@ export function createGameManager({
     net = createNetwork({ role: ROLE.HOST, maxPeers: guestCapacity });
 
     let roomCode;
+    let modes = [];
     try {
-      ({ roomCode } = await net.hostRoom());
+      ({ roomCode, modes = [] } = await net.hostRoom());
     } catch (error) {
       net?.close();
       net = null;
@@ -237,10 +239,23 @@ export function createGameManager({
       return;
     }
 
+    // A host normally comes up on both paths. If only one did, say so rather
+    // than letting a guest discover it as an unexplained failure to join.
+    if (!modes.includes(TRANSPORT.DIRECT)) {
+      toaster.show("Direct connections unavailable — friends will join via relay.", {
+        tone: "info",
+      });
+    } else if (!modes.includes(TRANSPORT.RELAY)) {
+      toaster.show("Relay unavailable — friends on strict networks may not connect.", {
+        tone: "info",
+      });
+    }
+
     store.set({
       role: ROLE.HOST,
       roomCode,
       localPlayerId,
+      transportModes: modes,
       connection: CONNECTION.WAITING,
       players: {
         [localPlayerId]: {
@@ -248,6 +263,8 @@ export function createGameManager({
           name,
           role: ROLE.HOST,
           connected: true,
+          // The host is the hub, so it has no single inbound path of its own.
+          via: TRANSPORT.DIRECT,
           ready: false,
         },
       },
@@ -318,6 +335,9 @@ export function createGameManager({
         name: payload.name,
         role: ROLE.GUEST,
         connected: true,
+        // Which path this player came in on. Published so everyone can see who
+        // is relayed — useful when one player's rounds feel a beat slower.
+        via: net.modeFor(peerKey),
         // Readiness and score survive a reconnect; the seat belongs to the player.
         ready: reclaiming ? (state.players[assignedId].ready ?? false) : false,
       };
@@ -464,13 +484,21 @@ export function createGameManager({
 
     net = createNetwork({ role: ROLE.GUEST, maxPeers: () => 1 });
 
+    let mode = TRANSPORT.DIRECT;
     try {
-      await net.joinRoom(roomCode);
+      ({ mode = TRANSPORT.DIRECT } = (await net.joinRoom(roomCode)) ?? {});
     } catch (error) {
       net?.close();
       net = null;
       fail(error.failure ?? FAILURE.ROOM_NOT_FOUND);
       return;
+    }
+
+    store.set({ transportModes: [mode] });
+    if (mode === TRANSPORT.RELAY) {
+      toaster.show("Your network blocks direct play — connected via relay.", {
+        tone: "info",
+      });
     }
 
     registerGuestHandlers();

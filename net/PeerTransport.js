@@ -1,9 +1,11 @@
 import {
   CONNECT_TIMEOUT_MS,
   FAILURE,
+  ICE_SERVERS,
   MAX_ROOM_CODE_ATTEMPTS,
   PEER_ID_PREFIX,
   ROOM_CODE_LENGTH,
+  TURN_SERVERS,
 } from "../js/constants.js";
 import { peerIdFor } from "./Protocol.js";
 
@@ -145,10 +147,29 @@ export function createPeerTransport({
     if (!closed) onPeerOpen(key);
   }
 
+  /**
+   * ICE configuration.
+   *
+   * STUN lets each peer learn its own public address, which is what makes a
+   * direct connection possible through ordinary NAT. TURN, when configured,
+   * relays the data itself and rescues the hardest networks — ICE prefers a
+   * direct route on its own and only falls back to a relay candidate when it has
+   * to, so listing both here gives "direct if possible, relayed if not" for free.
+   *
+   * @returns {object} options for the Peer constructor
+   */
+  function peerOptions() {
+    return {
+      config: { iceServers: [...ICE_SERVERS, ...TURN_SERVERS] },
+    };
+  }
+
   /** Builds a Peer and resolves once the broker has assigned it an id. */
   function openPeer(PeerCtor, id) {
     return new Promise((resolve, reject) => {
-      const instance = id ? new PeerCtor(id) : new PeerCtor();
+      const instance = id
+        ? new PeerCtor(id, peerOptions())
+        : new PeerCtor(peerOptions());
       let settled = false;
 
       const timer = setTimeout(() => {
@@ -220,6 +241,8 @@ export function createPeerTransport({
   }
 
   return {
+    name: "direct",
+
     /**
      * Claims a room. Tries the supplied code first, then fresh random codes if
      * the broker says the id is in use — the room-code collision case, handled

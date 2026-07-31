@@ -84,6 +84,15 @@ export function renderPlayerCard({
     host.textContent = "Host";
     meta.append(host);
   }
+  // Only worth saying when it is the slower path; "direct" is the unremarkable
+  // default and labelling it would just be noise.
+  if (player.via === "relay") {
+    const via = document.createElement("span");
+    via.className = "badge badge--relay";
+    via.textContent = "Relay";
+    via.title = "Connected through a relay because a direct connection was blocked";
+    meta.append(via);
+  }
   if (isLocal) {
     const you = document.createElement("span");
     you.className = "badge badge--you";
