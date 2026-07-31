@@ -61,7 +61,10 @@ export const MIN_WORD_LENGTH_BOUNDS = Object.freeze({ min: 2, max: 10 });
 export const DEFAULT_SETTINGS = Object.freeze({
   mode: GAME_MODE.DUEL,
   raceDurationMs: 30_000,
-  minWordLength: 2,
+  /* Four, not the two-letter floor: "at" and "ox" satisfy a duel rule without
+     anybody having to think, so the shortest legal word is a bad default even
+     though it stays a legal choice. */
+  minWordLength: 4,
 });
 
 /* ---- Round timing ------------------------------------------------------- */
@@ -158,6 +161,16 @@ export const RECONNECT_GRACE_MS = 20_000;
  * forever and every genuine reconnect is refused as "room full".
  */
 export const HELLO_TIMEOUT_MS = 10_000;
+
+/**
+ * Grace between telling a peer why it is about to be disconnected and actually
+ * dropping the link.
+ *
+ * Closing a channel discards anything still queued on it, so a removal notice
+ * sent and dropped in the same tick can lose the race and leave the other side
+ * showing "the host left" instead of what really happened.
+ */
+export const CLOSE_FLUSH_MS = 250;
 
 /** Backoff schedule for guest reconnect attempts, in milliseconds. */
 export const RECONNECT_BACKOFF_MS = [400, 900, 1_800, 3_500, 6_000];
@@ -290,6 +303,8 @@ export const FAILURE = Object.freeze({
   P2P_BLOCKED: "p2p-blocked",
   HOST_LEFT: "host-left",
   GUEST_LEFT: "guest-left",
+  /** The host removed this player from the room. */
+  KICKED: "kicked",
   BROKER_UNREACHABLE: "broker-unreachable",
   VERSION_MISMATCH: "version-mismatch",
 });

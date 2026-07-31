@@ -28,10 +28,20 @@ function describeStatus(player) {
  *   isLocal?: boolean,
  *   showScore?: boolean,
  *   score?: number,
- *   turnStatus?: "duelling"|"watching"|null
+ *   turnStatus?: "duelling"|"watching"|null,
+ *   kick?: {
+ *     pending: boolean,
+ *     onAsk: () => void,
+ *     onConfirm: () => void,
+ *     onCancel: () => void
+ *   }|null
  * }} options `turnStatus` is about this round (named apart from the connection
  *   status below), and is only passed when some players are benched — a mode
  *   where everyone plays should not label everybody redundantly.
+ *
+ *   `kick` is passed only for rows the host may remove. Removal is a two-tap
+ *   gesture: whether this row is mid-ask is `pending`, and the caller owns that
+ *   state, because a card is rebuilt from scratch on every snapshot.
  * @returns {HTMLLIElement}
  */
 export function renderPlayerCard({
@@ -41,6 +51,7 @@ export function renderPlayerCard({
   showScore = false,
   score = 0,
   turnStatus = null,
+  kick = null,
 }) {
   const row = document.createElement("li");
   // Seat colour is positional: pink, blue, mint, tangerine.
@@ -119,5 +130,47 @@ export function renderPlayerCard({
     row.append(points);
   }
 
+  if (kick) row.append(renderKickControl(player, kick));
+
   return row;
+}
+
+/**
+ * The host's remove control: an × that turns into a yes/no pair rather than
+ * acting on the first tap. Removing somebody cannot be undone from their side —
+ * they land on an error screen and have to be invited back — so it does not
+ * happen on a single mis-tap next to the ready button.
+ *
+ * @param {object} player
+ * @param {{pending: boolean, onAsk: Function, onConfirm: Function, onCancel: Function}} kick
+ * @returns {HTMLSpanElement}
+ */
+function renderKickControl(player, kick) {
+  const wrap = document.createElement("span");
+  wrap.className = "player__kick";
+
+  /** @param {string} label @param {string} className @param {Function} onClick */
+  const control = (label, className, onClick, ariaLabel) => {
+    const node = document.createElement("button");
+    node.type = "button";
+    node.className = className;
+    node.textContent = label;
+    if (ariaLabel) node.setAttribute("aria-label", ariaLabel);
+    node.addEventListener("click", onClick);
+    return node;
+  };
+
+  if (!kick.pending) {
+    wrap.append(
+      control("×", "kick", () => kick.onAsk(), `Remove ${player.name} from the room`),
+    );
+    return wrap;
+  }
+
+  wrap.classList.add("player__kick--asking");
+  wrap.append(
+    control("Remove", "kick kick--yes", () => kick.onConfirm(), `Remove ${player.name}`),
+    control("Keep", "kick kick--no", () => kick.onCancel(), `Keep ${player.name}`),
+  );
+  return wrap;
 }

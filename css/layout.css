@@ -19,7 +19,12 @@
       auto,
       auto;
     background-attachment: fixed;
+    /* Tilted cards and the bridge overhang the measure, and clipping that is
+       what keeps a phone from scrolling sideways. `clip` rather than `hidden`
+       because `hidden` would make the body a scroll container, and a sticky
+       descendant (the lobby action bar) would then have nothing to stick to. */
     overflow-x: hidden;
+    overflow-x: clip;
   }
 
   /* Paper grain, over everything, inert to pointers. */
@@ -160,6 +165,64 @@
     flex: 0 0 auto;
   }
 
+  /* ---- Lobby ----------------------------------------------------------
+     Six seats plus the full rules card is more than a phone screen holds, and
+     the two things a player needs — ready, and start — were the ones that fell
+     off the bottom. So the roster and the rules share a row as soon as there is
+     width for it, and the action bar stays stuck to the bottom of the viewport
+     until the page ends. */
+  .lobby__cols {
+    display: grid;
+    gap: var(--space-4);
+    align-items: start;
+  }
+
+  .lobby__cols > * {
+    min-inline-size: 0;
+  }
+
+  .lobby__bar {
+    position: sticky;
+    bottom: 0;
+    z-index: var(--z-sticky);
+    display: grid;
+    gap: var(--space-2);
+    justify-items: center;
+    /* Full bleed: the band runs the width of the window, so it reads as the
+       bottom edge of the screen rather than a slab floating over the sheet.
+       Anything past the viewport is taken care of by the body's overflow clip. */
+    margin-inline: calc(50% - 50vw);
+    padding: var(--space-3) var(--gutter)
+      max(var(--space-3), env(safe-area-inset-bottom));
+    /* Not opaque: the dot grid still reads through, so the bar looks like a
+       band printed on the sheet rather than a panel bolted over it. */
+    background-color: rgb(255 243 247 / 92%);
+    backdrop-filter: blur(6px);
+    border-block-start: var(--stroke-thin) dashed var(--ink-faint);
+  }
+
+  /* Leaving is a separate decision from playing, and it reads that way. */
+  .lobby__exit {
+    gap: var(--space-2);
+  }
+
+  .lobby__hint {
+    text-align: center;
+  }
+
+  /* The bar is permanent furniture on a phone, so it spends as little height as
+     it can: ready and start keep to one row by giving up some of their sticker
+     padding, rather than by wrapping and costing a whole button's worth. */
+  @media (width < 48rem) {
+    .lobby__bar {
+      --btn-pad-inline: var(--space-4);
+    }
+
+    .lobby__bar .row {
+      gap: var(--space-3);
+    }
+  }
+
   /* ---- Game board ------------------------------------------------------ */
   .board {
     display: grid;
@@ -212,6 +275,38 @@
     }
   }
 
+  /* Wide enough for two readable columns, or short enough that stacking them is
+     hopeless. Either way the rules take the right in one piece while the code
+     and the roster stack down the left. Placement is by area rather than source
+     order, so a phone can keep the rules above the roster while a wide window
+     puts them side by side. */
+  @media (width >= 50rem), (height <= 32rem) and (orientation: landscape) {
+    .lobby {
+      max-width: 100%;
+    }
+
+    .lobby__cols {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-areas:
+        "code  rules"
+        "seats rules";
+      gap: var(--space-5);
+    }
+
+    .lobby__code {
+      grid-area: code;
+    }
+
+    .lobby__rules {
+      grid-area: rules;
+    }
+
+    /* The roster is a plain component list; the lobby is what places it. */
+    .lobby__cols > .roster {
+      grid-area: seats;
+    }
+  }
+
   /* ---- Short and wide (phone held sideways) ---------------------------
      The shell stops reserving header and footer height. Type and tile sizes
      are handled by the matching query in variables.css, because token
@@ -234,6 +329,31 @@
     .board,
     .hero {
       gap: var(--space-4);
+    }
+
+    /* Sideways there is no vertical room to spare — a stacked bar would eat half
+       the window — so the bar goes one row deep: leave to the far left, ready
+       and start centred, the hint tucked under them. The columns of the lobby
+       itself are split by the query above. */
+    .lobby__bar {
+      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-areas:
+        "exit actions"
+        "exit hint";
+      align-items: center;
+      padding-block: var(--space-2) max(var(--space-2), env(safe-area-inset-bottom));
+    }
+
+    .lobby__exit {
+      grid-area: exit;
+    }
+
+    .lobby__primary {
+      grid-area: actions;
+    }
+
+    .lobby__hint {
+      grid-area: hint;
     }
   }
 }

@@ -63,23 +63,37 @@
           </div>
         </section>
 
-        <!-- ============ Lobby ========================================== -->
+        <!-- ============ Lobby ==========================================
+             A mode can seat six, and six seats plus the rules card is taller
+             than a phone screen. So: the rules come before the roster in the
+             source, because they are the thing you act on and the roster is
+             status; on a wide window they sit beside it instead; and the action
+             bar is sticky, so ready and start are on screen however long the
+             roster gets. -->
         <section class="screen" data-screen="lobby" hidden>
-          <div class="stack">
-            <div class="card card--halftone" style="text-align: center">
-              <p class="eyebrow">Room code</p>
-              <div class="code" id="lobby-code" style="margin-block: var(--space-3)"></div>
-              <button class="btn btn--quiet" type="button" data-action="copy-invite">
-                Copy invite link
-              </button>
+          <div class="stack lobby">
+            <div class="lobby__cols">
+              <div class="card card--halftone lobby__code" style="text-align: center">
+                <p class="eyebrow">Room code</p>
+                <div class="code" id="lobby-code" style="margin-block: var(--space-3)"></div>
+                <button class="btn btn--quiet" type="button" data-action="copy-invite">
+                  Copy invite link
+                </button>
+              </div>
+
+              <div class="lobby__rules" id="lobby-settings"></div>
+
+              <ul class="stack stack--tight roster" id="lobby-players"></ul>
             </div>
 
-            <ul class="stack stack--tight" id="lobby-players"></ul>
-
-            <div id="lobby-settings"></div>
-
-            <div class="row" id="lobby-actions"></div>
-            <p class="note" id="lobby-hint" style="text-align: center"></p>
+            <!-- Leave sits in its own row under the hint, well away from ready
+                 and start: leaving is unrecoverable — the room is gone — and it
+                 does not belong a thumb-width from the button everyone taps. -->
+            <div class="lobby__bar">
+              <div class="row lobby__primary" id="lobby-actions"></div>
+              <p class="note lobby__hint" id="lobby-hint"></p>
+              <div class="row lobby__exit" id="lobby-exit"></div>
+            </div>
           </div>
         </section>
 

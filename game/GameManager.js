@@ -1,4 +1,5 @@
 import {
+  CLOSE_FLUSH_MS,
   CONNECTION,
   FAILURE,
   HELLO_TIMEOUT_MS,
@@ -61,6 +62,30 @@ export function createGameManager({
   /** Host only. transport peer id → game player id, and back. */
   const peerToPlayer = new Map();
   const playerToPeer = new Map();
+
+  /**
+   * Host only. Players the host removed, refused if they come back.
+   *
+   * Without this a kick lasts as long as it takes to retype the code, which is
+   * no kick at all. It is a courtesy lock rather than a security control: player
+   * ids come from the browser's own storage, so someone determined can clear it
+   * and return with a fresh id. Nothing here is defending anything valuable —
+   * ending the room is the host's real remedy.
+   *
+   * @type {Set<string>}
+   */
+  const banned = new Set();
+
+  /**
+   * Host only. Assigned player id → the id that player asked for at HELLO.
+   *
+   * They differ when two tabs of one browser share a profile and the host has to
+   * rename the newcomer. A kick has to ban the id the client will present when
+   * it comes back, which is the one it asked for, not the one it was given.
+   *
+   * @type {Map<string, string>}
+   */
+  const claimedIds = new Map();
 
   /** Identity comes from the durable profile. @see js/profile.js */
   const resolveLocalPlayerId = () => profile.playerId();
@@ -156,6 +181,44 @@ export function createGameManager({
     relayActivityToObservers(playerId, 0);
   }
 
+  /**
+   * Host only. Frees a seat for good.
+   *
+   * Distinct from the close handler, which keeps the seat: a dropped player is
+   * expected back and reclaims their readiness and score, while a player who
+   * left or was removed is gone and the room shrinks around them. Both routes
+   * out share this so they cannot disagree about what shrinking means.
+   *
+   * @param {string} playerId
+   * @returns {{name: string}|null} null if no such seat
+   */
+  function releaseSeat(playerId) {
+    const state = store.getState();
+    const player = state.players[playerId];
+    if (!player) return null;
+
+    const players = { ...state.players };
+    delete players[playerId];
+    const peerKey = playerToPeer.get(playerId);
+    if (peerKey) peerToPlayer.delete(peerKey);
+    playerToPeer.delete(playerId);
+    claimedIds.delete(playerId);
+
+    const playerOrder = state.playerOrder.filter((id) => id !== playerId);
+    store.set({
+      players,
+      playerOrder,
+      connection: playerOrder.length > 1 ? CONNECTION.CONNECTED : CONNECTION.WAITING,
+    });
+
+    // Too few players to continue means back to the lobby, not a broken board.
+    if (!canStart(store.getState().match.settings.mode, playerOrder.length).ok) {
+      round?.returnToLobby();
+    }
+    broadcast();
+    return { name: player.name };
+  }
+
   /** @returns {number} guest seats this mode allows, excluding the host */
   function guestCapacity() {
     const state = store.getState();
@@ -212,6 +275,9 @@ export function createGameManager({
     net = null;
     peerToPlayer.clear();
     playerToPeer.clear();
+    claimedIds.clear();
+    // Bans belong to the room that issued them, not to this browser.
+    banned.clear();
     const fresh = createInitialState();
     fresh.localPlayerId = resolveLocalPlayerId();
     store.replace(fresh);
@@ -299,6 +365,14 @@ export function createGameManager({
       clearTimeout(helloDeadlines.get(peerKey));
       const state = store.getState();
 
+      if (banned.has(payload.playerId)) {
+        net.sendTo(peerKey, MSG.REJECT, { code: FAILURE.KICKED });
+        // Sending is not enough: an unanswered connection would sit in a seat
+        // until the HELLO deadline that was just cleared, and never expire.
+        setTimeout(() => net?.dropPeer(peerKey), CLOSE_FLUSH_MS);
+        return;
+      }
+
       /* Two tabs of one browser share a localStorage profile, so a guest can
          arrive carrying an id already in use. The host is the authority on
          identity, so it renames the newcomer and returns the assigned id in
@@ -329,6 +403,7 @@ export function createGameManager({
 
       peerToPlayer.set(peerKey, assignedId);
       playerToPeer.set(assignedId, peerKey);
+      claimedIds.set(assignedId, payload.playerId);
 
       const player = {
         id: assignedId,
@@ -399,26 +474,8 @@ export function createGameManager({
     net.on(MSG.LEAVE, (_payload, _message, peerKey) => {
       const id = peerToPlayer.get(peerKey);
       if (!id) return;
-      const state = store.getState();
-      const players = { ...state.players };
-      const name = players[id]?.name ?? "A player";
-      delete players[id];
-      peerToPlayer.delete(peerKey);
-      playerToPeer.delete(id);
-
-      const playerOrder = state.playerOrder.filter((pid) => pid !== id);
-      store.set({
-        players,
-        playerOrder,
-        connection: playerOrder.length > 1 ? CONNECTION.CONNECTED : CONNECTION.WAITING,
-      });
-
-      // Too few players to continue means back to the lobby, not a broken board.
-      if (!canStart(store.getState().match.settings.mode, playerOrder.length).ok) {
-        round?.returnToLobby();
-      }
-      broadcast();
-      toaster.show(`${name} left the room.`, { tone: "info" });
+      const gone = releaseSeat(id);
+      if (gone) toaster.show(`${gone.name} left the room.`, { tone: "info" });
     });
 
     net.onLifecycle({
@@ -617,6 +674,43 @@ export function createGameManager({
 
       store.setMatch({ settings: next });
       broadcast();
+    },
+
+    /**
+     * Host only. Removes a player from the room.
+     *
+     * The order matters: the notice goes out over a link that is about to be
+     * closed, so it is sent first and the link is dropped a moment later. Drop it
+     * in the same tick and the queued notice dies with the channel, leaving the
+     * removed player looking at "the host left" — true from their side, and
+     * misleading.
+     *
+     * @param {string} playerId
+     */
+    kickPlayer(playerId) {
+      const state = store.getState();
+      if (state.role !== ROLE.HOST) return;
+      // Leaving is how a host removes themselves. It closes the room, which is a
+      // different decision, and it has its own button.
+      if (playerId === state.localPlayerId) return;
+
+      const player = state.players[playerId];
+      if (!player) return;
+
+      banned.add(playerId);
+      const claimed = claimedIds.get(playerId);
+      if (claimed) banned.add(claimed);
+
+      const peerKey = playerToPeer.get(playerId);
+      releaseSeat(playerId);
+
+      // No peer means the seat was already a ghost — a player who dropped and
+      // never came back. Freeing it is the whole point; there is nobody to tell.
+      if (peerKey) {
+        net?.sendTo(peerKey, MSG.ROOM_CLOSED, { code: FAILURE.KICKED });
+        setTimeout(() => net?.dropPeer(peerKey), CLOSE_FLUSH_MS);
+      }
+      toaster.show(`${player.name} was removed.`, { tone: "info" });
     },
 
     /** Host only. Deals the first round. */

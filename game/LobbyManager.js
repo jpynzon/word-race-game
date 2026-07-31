@@ -3,25 +3,49 @@ import { selectEveryoneReady, selectLocalPlayer } from "../js/state.js";
 import { renderPlayerCard } from "../ui/PlayerCard.js";
 import { canStart, capacityFor } from "./GameSettings.js";
 
+/** "Ada", "Ada and Bee", "Ada, Bee and Kwame" — up to five of them in a room. */
+const NAME_LIST = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
+
+/** @param {string[]} names @returns {string} */
+function listNames(names) {
+  return NAME_LIST.format(names);
+}
+
 /**
- * Renders the lobby: room code, both seats, and whatever the local player is
+ * Renders the lobby: room code, every seat, and whatever the local player is
  * allowed to do next.
  *
- * The lobby is a pure function of state. It never stores anything of its own,
- * so a snapshot arriving from the host produces exactly the same lobby on both
- * screens without any reconciliation.
+ * The lobby is a pure function of state, with one exception: which row is
+ * currently asking "remove this player?" is view state and lives here. It is
+ * nobody else's business — least of all the other players' — and a card is
+ * rebuilt on every snapshot, so it could not survive on the card itself.
  *
  * @param {{
  *   store: object,
- *   dom: {code: HTMLElement, players: HTMLElement, actions: HTMLElement, hint: HTMLElement},
+ *   dom: {
+ *     code: HTMLElement, players: HTMLElement,
+ *     actions: HTMLElement, exit: HTMLElement, hint: HTMLElement
+ *   },
  *   actions: {
  *     toggleReady: () => void,
  *     startGame: () => void,
- *     leaveRoom: () => void
+ *     leaveRoom: () => void,
+ *     kickPlayer: (playerId: string) => void
  *   }
  * }} deps
  */
 export function createLobbyManager({ store, dom, actions }) {
+  /** Which seat is mid-confirmation, if any. @type {string|null} */
+  let pendingKickId = null;
+
+  /** @param {string|null} playerId */
+  function askToRemove(playerId) {
+    pendingKickId = playerId;
+    // Re-render from the store rather than patching the row: the ask is part of
+    // the lobby's rendering now, and there is exactly one function that does it.
+    render(store.getState());
+  }
+
   /** Renders the code as separate tilted digit tiles. */
   function renderCode(roomCode) {
     dom.code.replaceChildren();
@@ -44,13 +68,33 @@ export function createLobbyManager({ store, dom, actions }) {
   function renderPlayers(state) {
     dom.players.replaceChildren();
     const seats = capacityFor(state.match.settings.mode).max;
+    // Past four seats the roster is taller than a phone screen, so the rows
+    // tighten to keep the rules and the action bar within reach.
+    dom.players.classList.toggle("roster--dense", seats > 4);
+
+    // Only the host may remove anyone, and never themselves — the host leaving
+    // ends the room, which is a different decision with its own button.
+    const isHost = state.role === ROLE.HOST;
+
     for (let seat = 0; seat < seats; seat += 1) {
       const id = state.playerOrder[seat];
+      const removable = isHost && Boolean(id) && id !== state.localPlayerId;
       dom.players.append(
         renderPlayerCard({
           player: id ? state.players[id] : null,
           seatIndex: seat,
           isLocal: id === state.localPlayerId,
+          kick: removable
+            ? {
+                pending: pendingKickId === id,
+                onAsk: () => askToRemove(id),
+                onCancel: () => askToRemove(null),
+                onConfirm: () => {
+                  pendingKickId = null;
+                  actions.kickPlayer(id);
+                },
+              }
+            : null,
         }),
       );
     }
@@ -67,8 +111,14 @@ export function createLobbyManager({ store, dom, actions }) {
     return node;
   }
 
+  /**
+   * Ready and start go in the main row; leave goes in its own row underneath.
+   * Leaving cannot be undone — the room does not come back — so it is kept out
+   * of thumb range of the button every player taps.
+   */
   function renderActions(state) {
     dom.actions.replaceChildren();
+    dom.exit.replaceChildren();
     const local = selectLocalPlayer(state);
     if (!local) return;
 
@@ -96,14 +146,18 @@ export function createLobbyManager({ store, dom, actions }) {
       );
     }
 
-    dom.actions.append(
-      button("Leave", { variant: "btn--quiet", onClick: actions.leaveRoom }),
+    dom.exit.append(
+      button("Leave the room", { variant: "btn--quiet", onClick: actions.leaveRoom }),
     );
   }
 
   /**
    * One sentence naming what the room is waiting on. Always says whose move it
    * is, because "waiting" without a subject is the least useful status there is.
+   *
+   * It sits in the sticky bar, on screen the whole time a player is in the
+   * lobby, so it is worded for a full room rather than the two-player one the
+   * game started out as.
    */
   function renderHint(state) {
     const local = selectLocalPlayer(state);
@@ -127,21 +181,24 @@ export function createLobbyManager({ store, dom, actions }) {
         .map((id) => state.players[id])
         .filter((player) => player && !player.ready)
         .map((player) => (player.id === state.localPlayerId ? "you" : player.name));
-      dom.hint.textContent = `Waiting on ${waitingOn.join(" and ")}.`;
+      dom.hint.textContent = `Waiting on ${listNames(waitingOn)}.`;
       return;
     }
     dom.hint.textContent = isHost
-      ? "Both ready — start whenever you like."
-      : "Both ready. The host starts the match.";
+      ? "Everyone's ready — start whenever you like."
+      : "Everyone's ready. The host starts the match.";
   }
 
-  return {
-    /** @param {object} state */
-    render(state) {
-      renderCode(state.roomCode);
-      renderPlayers(state);
-      renderActions(state);
-      renderHint(state);
-    },
-  };
+  /** @param {object} state */
+  function render(state) {
+    // A player who left, or was removed, cannot still be mid-question.
+    if (pendingKickId && !state.players[pendingKickId]) pendingKickId = null;
+
+    renderCode(state.roomCode);
+    renderPlayers(state);
+    renderActions(state);
+    renderHint(state);
+  }
+
+  return { render };
 }

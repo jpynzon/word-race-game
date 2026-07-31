@@ -35,6 +35,7 @@ function boot() {
     lobbyCode: document.getElementById("lobby-code"),
     lobbyPlayers: document.getElementById("lobby-players"),
     lobbyActions: document.getElementById("lobby-actions"),
+    lobbyExit: document.getElementById("lobby-exit"),
     lobbyHint: document.getElementById("lobby-hint"),
     lobbySettings: document.getElementById("lobby-settings"),
 
@@ -135,12 +136,14 @@ function boot() {
       code: dom.lobbyCode,
       players: dom.lobbyPlayers,
       actions: dom.lobbyActions,
+      exit: dom.lobbyExit,
       hint: dom.lobbyHint,
     },
     actions: {
       toggleReady: () => game.toggleReady(),
       startGame: () => game.startGame(),
       leaveRoom: () => game.leaveRoom(),
+      kickPlayer: (playerId) => game.kickPlayer(playerId),
     },
   });
 

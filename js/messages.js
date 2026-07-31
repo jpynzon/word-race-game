@@ -25,6 +25,12 @@ export const FAILURE_COPY = Object.freeze({
     title: "Your opponent left",
     detail: "Your room is still open. Share the code again to bring someone in.",
   },
+  [FAILURE.KICKED]: {
+    label: "Removed",
+    title: "The host removed you from the room",
+    detail:
+      "Only the host can decide who is in their room. You can start your own and invite whoever you like.",
+  },
   [FAILURE.ROOM_NOT_FOUND]: {
     label: "No such room",
     title: "Nobody is hosting that code",
